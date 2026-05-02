@@ -6,904 +6,1732 @@
   <meta name="theme-color" content="#000000" />
   <title>AuraBank · Banca Real</title>
 
+  <!--
+  ╔══════════════════════════════════════════════════════════════╗
+  ║                  SUPABASE SQL SETUP                          ║
+  ║   Ejecuta esto en tu Supabase → SQL Editor antes de usar    ║
+  ╠══════════════════════════════════════════════════════════════╣
+
+  -- 1. TABLA PROFILES
+  CREATE TABLE IF NOT EXISTS public.profiles (
+    id        UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    cedula    TEXT UNIQUE NOT NULL,
+    full_name TEXT NOT NULL,
+    phone     TEXT,
+    balance   DECIMAL(14,2) NOT NULL DEFAULT 100.00,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  -- 2. TABLA TRANSACTIONS
+  CREATE TABLE IF NOT EXISTS public.transactions (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    sender_id        UUID REFERENCES public.profiles(id),
+    receiver_id      UUID REFERENCES public.profiles(id),
+    receiver_cedula  TEXT,
+    amount           DECIMAL(14,2) NOT NULL CHECK(amount > 0),
+    type             TEXT NOT NULL DEFAULT 'transfer' CHECK(type IN ('transfer','withdrawal')),
+    bank_name        TEXT,
+    account_dest     TEXT,
+    status           TEXT NOT NULL DEFAULT 'Completado',
+    created_at       TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  -- 3. HABILITAR RLS
+  ALTER TABLE public.profiles    ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
+
+  -- 4. POLÍTICAS profiles
+  DROP POLICY IF EXISTS "own_select" ON public.profiles;
+  DROP POLICY IF EXISTS "own_update" ON public.profiles;
+  DROP POLICY IF EXISTS "own_insert" ON public.profiles;
+  CREATE POLICY "own_select" ON public.profiles FOR SELECT USING (auth.uid() = id);
+  CREATE POLICY "own_update" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+  CREATE POLICY "own_insert" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+
+  -- POLÍTICA extra: permitir buscar destinatario por cédula (solo columna necesaria)
+  CREATE POLICY "lookup_by_cedula" ON public.profiles FOR SELECT
+    USING (true);   -- ajustar si quieres más restrictivo
+
+  -- 5. POLÍTICAS transactions
+  DROP POLICY IF EXISTS "own_tx" ON public.transactions;
+  DROP POLICY IF EXISTS "insert_tx" ON public.transactions;
+  CREATE POLICY "own_tx"    ON public.transactions FOR SELECT
+    USING (sender_id = auth.uid() OR receiver_id = auth.uid());
+  CREATE POLICY "insert_tx" ON public.transactions FOR INSERT
+    WITH CHECK (sender_id = auth.uid());
+
+  -- 6. FUNCIÓN RPC ATÓMICA make_transfer
+  CREATE OR REPLACE FUNCTION public.make_transfer(
+    p_sender_id       UUID,
+    p_receiver_cedula TEXT,
+    p_amount          DECIMAL
+  )
+  RETURNS JSONB
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = public
+  AS $$
+  DECLARE
+    v_receiver   public.profiles%ROWTYPE;
+    v_sender_bal DECIMAL;
+    v_tx_id      UUID;
+  BEGIN
+    -- Validar monto
+    IF p_amount <= 0 THEN
+      RAISE EXCEPTION 'monto_invalido: El monto debe ser mayor a 0';
+    END IF;
+
+    -- Buscar receptor
+    SELECT * INTO v_receiver FROM public.profiles WHERE cedula = p_receiver_cedula;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'destinatario_no_existe: La cédula % no está registrada en AuraBank', p_receiver_cedula;
+    END IF;
+
+    -- No auto-envío
+    IF v_receiver.id = p_sender_id THEN
+      RAISE EXCEPTION 'auto_envio: No puedes transferirte dinero a ti mismo';
+    END IF;
+
+    -- Verificar saldo (con bloqueo de fila)
+    SELECT balance INTO v_sender_bal FROM public.profiles WHERE id = p_sender_id FOR UPDATE;
+    IF v_sender_bal < p_amount THEN
+      RAISE EXCEPTION 'saldo_insuficiente: Saldo insuficiente (disponible: %)', v_sender_bal;
+    END IF;
+
+    -- Débito emisor
+    UPDATE public.profiles SET balance = balance - p_amount WHERE id = p_sender_id;
+
+    -- Crédito receptor
+    UPDATE public.profiles SET balance = balance + p_amount WHERE id = v_receiver.id;
+
+    -- Registrar transacción
+    INSERT INTO public.transactions(sender_id, receiver_id, receiver_cedula, amount, type, status)
+    VALUES (p_sender_id, v_receiver.id, p_receiver_cedula, p_amount, 'transfer', 'Completado')
+    RETURNING id INTO v_tx_id;
+
+    RETURN jsonb_build_object(
+      'ok', true,
+      'tx_id', v_tx_id,
+      'receiver_name', v_receiver.full_name
+    );
+  END;
+  $$;
+
+  -- 7. REALTIME (ejecutar como superuser si no está ya)
+  -- ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles;
+  -- ALTER PUBLICATION supabase_realtime ADD TABLE public.transactions;
+
+  -- 8. MUY IMPORTANTE: En Supabase Dashboard → Auth → Settings
+  --    Desactiva "Enable email confirmations" para que el registro
+  --    sea inmediato sin necesidad de confirmar email.
+
+  ╚══════════════════════════════════════════════════════════════╝
+  -->
+
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            gold: { DEFAULT: '#facc15', dark: '#eab308', light: '#fde68a' },
-            ink:  { DEFAULT: '#0a0a0a', card: '#111', border: '#1f1f1f' }
-          },
-          fontFamily: { display: ['Sora', 'sans-serif'], body: ['DM Sans', 'sans-serif'] }
-        }
-      }
-    }
-  </script>
-
   <style>
-    *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    html, body { margin:0; padding:0; background:#000; font-family:'DM Sans',sans-serif; color:#fff; height:100%; overflow-x:hidden; }
-    #app-shell { width:100%; max-width:430px; min-height:100vh; margin:0 auto; background:#0a0a0a; position:relative; overflow:hidden; }
-    .screen { display:none; min-height:100vh; flex-direction:column; }
-    .screen.active { display:flex; animation:fade-in 0.35s ease; }
-    @keyframes fade-in { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
-    @keyframes spin { to{transform:rotate(360deg)} }
-    @keyframes pulse-scale { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
+    :root {
+      --gold:     #f5c518;
+      --gold-dim: #7a630c;
+      --gold-bg:  #1a1500;
+      --green:    #16a34a;
+      --green-bg: #051a0a;
+      --red:      #dc2626;
+      --red-bg:   #1a0505;
+      --blue:     #3b82f6;
+      --ink:      #080808;
+      --card:     #101010;
+      --border:   #1e1e1e;
+      --muted:    #3a3a3a;
+      --text-2:   #888;
+      --text-3:   #444;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    html, body {
+      margin: 0; padding: 0;
+      background: #000;
+      font-family: 'Sora', sans-serif;
+      color: #fff;
+      height: 100%;
+      overflow-x: hidden;
+    }
+
+    #shell {
+      width: 100%;
+      max-width: 430px;
+      min-height: 100dvh;
+      margin: 0 auto;
+      background: var(--ink);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* ── SCREENS ── */
+    .screen { display: none; min-height: 100dvh; flex-direction: column; }
+    .screen.active { display: flex; animation: screen-in 0.3s cubic-bezier(.16,1,.3,1); }
+
+    @keyframes screen-in {
+      from { opacity: 0; transform: translateY(12px) scale(0.99); }
+      to   { opacity: 1; transform: translateY(0)    scale(1); }
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50%       { transform: translateY(-8px); }
+    }
+
+    @keyframes shimmer {
+      0%   { background-position: -200% 0; }
+      100% { background-position:  200% 0; }
+    }
+
+    @keyframes pulse-ring {
+      0%   { transform: scale(1);   opacity: 1; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
 
     /* ── SPLASH ── */
-    #screen-splash { background:radial-gradient(ellipse at center, #1a1a00 0%, #000 70%); align-items:center; justify-content:center; gap:16px; }
-    .splash-logo { font-family:'Sora'; font-size:3rem; font-weight:800; color:#facc15; animation:pulse-scale 2s infinite; }
-    .splash-sub { color:#555; font-size:0.9rem; letter-spacing:1px; }
-    .spinner { width:36px; height:36px; border:3px solid #1f1f1f; border-top-color:#facc15; border-radius:50%; animation:spin 0.9s linear infinite; }
+    #s-splash {
+      align-items: center; justify-content: center; gap: 20px;
+      background: radial-gradient(ellipse 80% 60% at 50% 30%, #1f1700 0%, #000 70%);
+    }
 
-    /* ── WELCOME (Onboarding) ── */
-    #screen-welcome { background:linear-gradient(180deg, #000 0%, #0a0a00 100%); align-items:center; justify-content:center; padding:40px 24px; gap:0; }
-    .welcome-badge { background:#1a1a00; border:1px solid #facc15; border-radius:100px; padding:6px 16px; font-size:0.75rem; color:#facc15; font-weight:600; margin-bottom:24px; }
-    .welcome-gift-card { background:linear-gradient(135deg, #1a1a00, #111); border:1px solid #2a2a10; border-radius:22px; padding:24px; width:100%; margin:24px 0; text-align:center; }
-    .gift-amount { font-family:'Sora'; font-size:3rem; font-weight:800; color:#facc15; }
+    .splash-wordmark {
+      font-size: 3rem; font-weight: 800; letter-spacing: -2px;
+      color: var(--gold);
+      animation: float 3s ease-in-out infinite;
+      text-shadow: 0 0 60px rgba(245,197,24,0.3);
+    }
 
-    /* ── REGISTER ── */
-    #screen-register { justify-content:flex-end; background:linear-gradient(180deg, #000 0%, #0a0a00 100%); }
-    .bottom-card { background:#111; border-radius:28px 28px 0 0; padding:28px 24px 50px; border-top:1px solid #1f1f1f; }
-    .cred-box { background:#0a1a0a; border:1px solid #1a2a1a; border-radius:14px; padding:14px 16px; margin-top:14px; }
-    .cred-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:0.82rem; }
-    .cred-val { font-family:'Sora'; font-weight:700; color:#22c55e; font-size:0.85rem; }
+    .splash-tag { font-size: 0.7rem; color: var(--muted); letter-spacing: 3px; text-transform: uppercase; }
 
-    /* ── LOGIN ── */
-    #screen-login { justify-content:flex-end; background:linear-gradient(180deg, #000 0%, #0a0a00 100%); }
-    .login-hint { background:#111; border-radius:14px; padding:12px 16px; margin-bottom:12px; font-size:0.75rem; color:#555; line-height:1.7; }
+    .loader-ring {
+      width: 40px; height: 40px;
+      border: 2.5px solid var(--border);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+      margin-top: 4px;
+    }
 
-    /* ── INPUTS ── */
-    .input-field { width:100%; background:#1a1a1a; border:1.5px solid #2a2a2a; border-radius:14px; padding:14px 16px; color:#fff; font-family:'DM Sans'; font-size:1rem; outline:none; transition:border-color 0.2s; -webkit-appearance:none; }
-    .input-field:focus { border-color:#facc15; }
-    select.input-field { cursor:pointer; }
-    .input-label { display:block; color:#666; font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; margin-top:14px; }
-    .input-wrapper { position:relative; }
+    /* ── SETUP NOTICE ── */
+    #s-setup {
+      align-items: center; justify-content: center; padding: 24px;
+      background: var(--ink);
+    }
+
+    .setup-box {
+      background: #0d0d00;
+      border: 1.5px solid #2a2500;
+      border-radius: 20px;
+      padding: 24px;
+      width: 100%;
+    }
+
+    /* ── WELCOME ── */
+    #s-welcome {
+      align-items: center; justify-content: center;
+      padding: 40px 24px 60px;
+      background: radial-gradient(ellipse 100% 70% at 50% 0%, #1a1500 0%, #000 60%);
+      gap: 0;
+    }
+
+    .welcome-pill {
+      background: rgba(245,197,24,0.1);
+      border: 1px solid rgba(245,197,24,0.25);
+      border-radius: 100px;
+      padding: 5px 14px;
+      font-size: 0.72rem; font-weight: 600;
+      color: var(--gold);
+      letter-spacing: 0.5px;
+      margin-bottom: 28px;
+    }
+
+    .welcome-hero {
+      font-size: 2.2rem; font-weight: 800;
+      text-align: center; line-height: 1.15;
+      margin-bottom: 32px;
+    }
+
+    .gift-card {
+      width: 100%;
+      background: linear-gradient(135deg, #1a1500 0%, #110e00 100%);
+      border: 1px solid #2a2200;
+      border-radius: 20px;
+      padding: 20px;
+      margin-bottom: 28px;
+      position: relative; overflow: hidden;
+    }
+
+    .gift-card::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(90deg,transparent,rgba(245,197,24,0.04),transparent);
+      background-size: 200% 100%;
+      animation: shimmer 3s infinite;
+    }
+
+    .gift-amount { font-size: 2.8rem; font-weight: 800; color: var(--gold); line-height: 1; }
+
+    .cred-info {
+      background: rgba(245,197,24,0.06);
+      border: 1px solid rgba(245,197,24,0.12);
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-top: 14px;
+      font-size: 0.77rem; color: var(--text-2); line-height: 1.9;
+    }
+
+    /* ── FORMS ── */
+    .bottom-sheet {
+      background: var(--card);
+      border-radius: 26px 26px 0 0;
+      padding: 28px 24px 50px;
+      border-top: 1px solid var(--border);
+    }
+
+    .field-label {
+      display: block;
+      color: var(--text-3);
+      font-size: 0.7rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.8px;
+      margin-bottom: 7px; margin-top: 16px;
+    }
+
+    .field-label:first-child { margin-top: 0; }
+
+    .field-input {
+      width: 100%;
+      background: #161616;
+      border: 1.5px solid var(--border);
+      border-radius: 13px;
+      padding: 14px 16px;
+      color: #fff;
+      font-family: 'Sora', sans-serif;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      -webkit-appearance: none;
+    }
+
+    .field-input:focus {
+      border-color: var(--gold);
+      box-shadow: 0 0 0 3px rgba(245,197,24,0.08);
+    }
+
+    .field-input::placeholder { color: var(--text-3); }
+    select.field-input { cursor: pointer; }
+
+    .cred-preview {
+      background: var(--green-bg);
+      border: 1px solid #1a3a20;
+      border-radius: 13px;
+      padding: 13px 15px;
+      margin-top: 14px;
+    }
+
+    .cred-row {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 0.8rem; margin-bottom: 5px;
+    }
+
+    .cred-row:last-child { margin-bottom: 0; }
+
+    .cred-val {
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--green); font-size: 0.82rem;
+    }
 
     /* ── BUTTONS ── */
-    .btn-primary { width:100%; background:#facc15; color:#000; font-family:'Sora'; font-weight:700; font-size:1rem; padding:16px; border-radius:14px; border:none; cursor:pointer; min-height:54px; display:flex; align-items:center; justify-content:center; gap:8px; transition:transform 0.15s, opacity 0.15s; }
-    .btn-primary:active { transform:scale(0.97); opacity:0.9; }
-    .btn-primary:disabled { opacity:0.5; cursor:not-allowed; }
-    .btn-ghost { background:transparent; border:none; color:#666; cursor:pointer; display:flex; align-items:center; gap:6px; font-size:0.9rem; }
-    .btn-secondary { background:transparent; border:1.5px solid #2a2a2a; color:#aaa; font-family:'DM Sans'; font-size:0.9rem; padding:14px 20px; border-radius:14px; cursor:pointer; width:100%; margin-top:10px; }
+    .btn-gold {
+      width: 100%;
+      background: var(--gold);
+      color: #000;
+      font-family: 'Sora', sans-serif; font-weight: 700; font-size: 0.95rem;
+      padding: 15px 20px;
+      border-radius: 13px; border: none;
+      cursor: pointer; min-height: 52px;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      transition: transform 0.15s, opacity 0.15s, filter 0.15s;
+      position: relative; overflow: hidden;
+    }
+
+    .btn-gold::after {
+      content: '';
+      position: absolute; inset: 0;
+      background: rgba(255,255,255,0);
+      transition: background 0.15s;
+    }
+
+    .btn-gold:hover::after { background: rgba(255,255,255,0.08); }
+    .btn-gold:active { transform: scale(0.97); opacity: 0.88; }
+    .btn-gold:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .btn-outline {
+      width: 100%; background: transparent;
+      border: 1.5px solid var(--border);
+      color: var(--text-2);
+      font-family: 'Sora', sans-serif; font-size: 0.9rem;
+      padding: 13px 20px; border-radius: 13px;
+      cursor: pointer; margin-top: 10px;
+      transition: border-color 0.2s;
+    }
+
+    .btn-outline:hover { border-color: var(--muted); }
+
+    .btn-ghost {
+      background: transparent; border: none;
+      color: var(--text-2); cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+      font-family: 'Sora', sans-serif; font-size: 0.85rem;
+      padding: 8px 0;
+      transition: color 0.2s;
+    }
+
+    .btn-ghost:hover { color: #fff; }
 
     /* ── DASHBOARD ── */
-    #screen-dashboard { overflow-y:auto; padding-bottom:90px; }
-    .dash-header { display:flex; align-items:center; justify-content:space-between; padding:20px 20px 0; }
-    .balance-card { margin:16px 16px 0; background:linear-gradient(135deg,#1a1a0a 0%,#111 60%,#0a0a00 100%); border:1px solid #2a2a0a; border-radius:22px; padding:24px 20px; }
-    .balance-amount { font-family:'Sora'; font-weight:800; font-size:2.8rem; color:#fff; line-height:1; transition:all 0.4s; }
-    .balance-amount.updated { color:#facc15; }
-    .quick-actions { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; padding:16px; }
-    .action-tile { background:#111; border:1px solid #1f1f1f; border-radius:16px; padding:14px 8px; display:flex; flex-direction:column; align-items:center; gap:8px; cursor:pointer; transition:border-color 0.2s, transform 0.15s; }
-    .action-tile:active { transform:scale(0.95); }
-    .action-tile:hover { border-color:#2a2a2a; }
-    .bottom-nav { position:fixed; bottom:0; left:50%; transform:translateX(-50%); width:100%; max-width:430px; background:#0a0a0a; border-top:1px solid #1f1f1f; display:flex; padding:10px 0 20px; z-index:100; }
-    .nav-item { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; }
-    .nav-item span { font-size:0.65rem; color:#555; }
-    .nav-item.active span { color:#facc15; }
+    #s-dashboard { overflow-y: auto; padding-bottom: 96px; }
 
-    /* ── TRANSFER ── */
-    #screen-transfer, #screen-withdraw { overflow-y:auto; padding:20px 16px 40px; }
-    .preview-card { background:#111; border:1px solid #1f1f1f; border-radius:16px; padding:16px; margin:16px 0; }
+    .dash-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 22px 20px 0;
+    }
+
+    .balance-card {
+      margin: 16px 16px 0;
+      background: linear-gradient(145deg, #151200 0%, #0d0d0d 50%, #0a0800 100%);
+      border: 1px solid #252200;
+      border-radius: 22px;
+      padding: 22px 20px;
+      position: relative; overflow: hidden;
+    }
+
+    .balance-card::before {
+      content: '';
+      position: absolute;
+      top: -40%; right: -20%;
+      width: 200px; height: 200px;
+      background: radial-gradient(circle, rgba(245,197,24,0.07) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .balance-label {
+      font-size: 0.65rem; color: var(--text-2);
+      text-transform: uppercase; letter-spacing: 1.5px;
+      margin-bottom: 6px;
+    }
+
+    .balance-amount {
+      font-size: 2.6rem; font-weight: 800; line-height: 1;
+      transition: color 0.5s;
+    }
+
+    .balance-amount.flash-up   { color: #22c55e; animation: none; }
+    .balance-amount.flash-down { color: var(--red); }
+
+    .balance-footer {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 14px;
+    }
+
+    .live-dot {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 0.65rem; color: var(--text-2);
+      position: relative;
+    }
+
+    .live-dot-inner {
+      width: 6px; height: 6px;
+      background: #22c55e; border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .live-dot-inner::after {
+      content: '';
+      position: absolute;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #22c55e;
+      animation: pulse-ring 1.5s ease-out infinite;
+    }
+
+    /* ── QUICK ACTIONS ── */
+    .quick-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 10px; padding: 16px;
+    }
+
+    .quick-tile {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px 6px;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      cursor: pointer;
+      transition: border-color 0.2s, transform 0.15s, background 0.2s;
+    }
+
+    .quick-tile:active { transform: scale(0.93); }
+    .quick-tile:hover { border-color: var(--muted); background: #141414; }
+
+    .quick-tile span {
+      font-size: 0.62rem; color: var(--text-2); text-align: center;
+    }
+
+    /* ── BOTTOM NAV ── */
+    .bottom-nav {
+      position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+      width: 100%; max-width: 430px;
+      background: rgba(8,8,8,0.95);
+      backdrop-filter: blur(20px);
+      border-top: 1px solid var(--border);
+      display: flex; padding: 10px 0 22px; z-index: 100;
+    }
+
+    .nav-tab {
+      flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px;
+      cursor: pointer; transition: opacity 0.2s;
+    }
+
+    .nav-tab span { font-size: 0.6rem; color: var(--text-3); }
+    .nav-tab.active span { color: var(--gold); }
+
+    /* ── TRANSACTIONS ── */
+    .section-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0 16px; margin-bottom: 2px;
+    }
+
+    .section-title { font-size: 0.82rem; font-weight: 600; color: var(--text-2); }
+
+    .tx-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      transition: background 0.15s;
+      cursor: default;
+    }
+
+    .tx-item:hover { background: rgba(255,255,255,0.02); }
+
+    .tx-icon {
+      width: 42px; height: 42px;
+      border-radius: 13px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem; flex-shrink: 0;
+    }
+
+    .tx-meta { flex: 1; min-width: 0; }
+    .tx-title { font-size: 0.84rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tx-date  { font-size: 0.68rem; color: var(--text-3); margin-top: 2px; }
+
+    .tx-amount { font-family: 'JetBrains Mono', monospace; font-weight: 600; font-size: 0.9rem; flex-shrink: 0; }
+
+    /* ── TRANSFER / WITHDRAW ── */
+    .page-scroll { overflow-y: auto; flex: 1; padding: 20px 16px 40px; }
+
+    .avail-bar {
+      background: var(--card); border-radius: 13px;
+      padding: 13px 16px; margin-bottom: 16px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+
+    .preview-box {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 15px; padding: 16px; margin-top: 14px;
+      display: none;
+    }
+
+    .preview-row {
+      display: flex; justify-content: space-between;
+      font-size: 0.82rem; margin-bottom: 8px;
+    }
+
+    .preview-row:last-child { margin-bottom: 0; }
+
+    .fee-box {
+      background: #110e00; border: 1px solid #2a2000;
+      border-radius: 14px; padding: 14px 16px;
+      margin: 14px 0 20px;
+    }
 
     /* ── SUCCESS ── */
-    #screen-success { align-items:center; justify-content:center; padding:32px 24px; background:radial-gradient(ellipse at center, #001a00 0%, #000 70%); }
-    .success-icon { width:80px; height:80px; background:#0a2a0a; border:2px solid #22c55e; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:2.5rem; margin-bottom:24px; }
-    .receipt-card { background:#111; border-radius:22px; padding:24px; width:100%; border:1px solid #1f1f1f; margin-top:20px; }
-    .receipt-row { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #1a1a1a; font-size:0.82rem; }
-    .receipt-row:last-child { border-bottom:none; }
+    #s-success {
+      align-items: center; justify-content: center;
+      padding: 32px 24px 50px;
+      background: radial-gradient(ellipse 80% 50% at 50% 20%, #002a00 0%, #000 60%);
+    }
 
-    /* ── TRANSACTIONS LIST ── */
-    .tx-item { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid #111; }
-    .tx-icon { width:40px; height:40px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0; }
+    .success-icon {
+      width: 80px; height: 80px;
+      background: var(--green-bg);
+      border: 2px solid var(--green);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 2.4rem; margin-bottom: 20px;
+    }
+
+    .receipt-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 20px; padding: 22px; width: 100%; margin-top: 20px;
+    }
+
+    .receipt-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 9px 0; border-bottom: 1px solid var(--border);
+      font-size: 0.82rem;
+    }
+
+    .receipt-row:last-child { border-bottom: none; }
 
     /* ── PROCESSING OVERLAY ── */
-    #processing-overlay { display:none; position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.95); backdrop-filter:blur(12px); flex-direction:column; align-items:center; justify-content:center; gap:20px; }
-    #processing-overlay.active { display:flex; }
-    .proc-spinner { width:60px; height:60px; border:4px solid #1f1f1f; border-top-color:#facc15; border-radius:50%; animation:spin 0.8s linear infinite; }
-    .proc-steps { display:flex; flex-direction:column; gap:10px; min-width:240px; }
-    .proc-step { display:flex; align-items:center; gap:10px; font-size:0.85rem; color:#333; transition:color 0.4s; }
-    .proc-step.active { color:#fff; }
-    .proc-step.done { color:#22c55e; }
-    .proc-step.done::before { content:'✓ '; }
-    .proc-step::before { content:'○ '; }
+    #proc-overlay {
+      display: none; position: fixed; inset: 0; z-index: 9999;
+      background: rgba(0,0,0,0.97);
+      backdrop-filter: blur(16px);
+      flex-direction: column; align-items: center; justify-content: center; gap: 24px;
+    }
+
+    #proc-overlay.on { display: flex; }
+
+    .proc-ring {
+      width: 64px; height: 64px;
+      border: 3px solid var(--border);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    .proc-steps { display: flex; flex-direction: column; gap: 12px; min-width: 230px; }
+
+    .proc-step {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 0.82rem; color: var(--text-3);
+      transition: color 0.35s;
+    }
+
+    .proc-step.cur  { color: #fff; }
+    .proc-step.done { color: var(--green); }
+
+    .proc-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--border); flex-shrink: 0;
+      transition: background 0.35s;
+    }
+
+    .proc-step.cur  .proc-dot { background: var(--gold); }
+    .proc-step.done .proc-dot { background: var(--green); }
 
     /* ── TOAST ── */
-    #toast-container { position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:99999; width:calc(100% - 32px); max-width:398px; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
-    .toast { background:#1a1a1a; border-radius:16px; padding:14px 16px; display:flex; align-items:flex-start; gap:12px; transform:translateY(-30px); opacity:0; transition:all 0.3s; border-left:3px solid #333; pointer-events:auto; }
-    .toast.show { transform:translateY(0); opacity:1; }
+    #toast-wrap {
+      position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+      z-index: 99999; width: calc(100% - 28px); max-width: 400px;
+      display: flex; flex-direction: column; gap: 8px;
+      pointer-events: none;
+    }
+
+    .toast {
+      background: #181818;
+      border: 1px solid var(--border);
+      border-radius: 14px; padding: 13px 15px;
+      display: flex; align-items: flex-start; gap: 11px;
+      transform: translateY(-20px) scale(0.97); opacity: 0;
+      transition: all 0.3s cubic-bezier(.16,1,.3,1);
+      pointer-events: auto; cursor: pointer;
+    }
+
+    .toast.in { transform: translateY(0) scale(1); opacity: 1; }
+    .toast-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+    .toast-title { font-size: 0.83rem; font-weight: 700; }
+    .toast-msg   { font-size: 0.73rem; color: var(--text-2); margin-top: 2px; }
 
     /* ── SCROLLBAR ── */
-    ::-webkit-scrollbar { width:4px; }
-    ::-webkit-scrollbar-track { background:transparent; }
-    ::-webkit-scrollbar-thumb { background:#2a2a2a; border-radius:2px; }
+    ::-webkit-scrollbar { width: 3px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 2px; }
+
+    /* ── EMPTY STATE ── */
+    .empty-state {
+      text-align: center; padding: 40px 20px;
+      color: var(--text-3); font-size: 0.82rem;
+    }
+
+    .empty-icon { font-size: 2.5rem; margin-bottom: 10px; opacity: 0.3; }
+
+    /* ── SKELETON ── */
+    .skeleton {
+      background: linear-gradient(90deg, #151515 25%, #1e1e1e 50%, #151515 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 8px;
+    }
   </style>
 </head>
 <body>
 
-<div id="app-shell">
-  <div id="toast-container"></div>
+<div id="shell">
+  <div id="toast-wrap"></div>
 
-  <!-- ═══ PROCESSING OVERLAY ═══ -->
-  <div id="processing-overlay">
-    <div class="proc-spinner"></div>
-    <p id="proc-title" style="font-family:'Sora';font-weight:700;font-size:1.1rem;color:#fff;text-align:center;"></p>
+  <!-- ══ PROCESSING OVERLAY ══ -->
+  <div id="proc-overlay">
+    <div class="proc-ring"></div>
+    <p id="proc-title" style="font-size:1rem;font-weight:700;color:#fff;text-align:center;"></p>
     <div class="proc-steps" id="proc-steps"></div>
   </div>
 
-  <!-- ═══ SPLASH ═══ -->
-  <div id="screen-splash" class="screen active">
-    <div class="splash-logo">AuraBank</div>
-    <div class="splash-sub">Conectando con Supabase...</div>
-    <div class="spinner" style="margin-top:8px;"></div>
+  <!-- ══ SPLASH ══ -->
+  <div id="s-splash" class="screen active">
+    <div class="splash-wordmark">AuraBank</div>
+    <div class="splash-tag">Conectando con Supabase</div>
+    <div class="loader-ring"></div>
   </div>
 
-  <!-- ═══ WELCOME / ONBOARDING ═══ -->
-  <div id="screen-welcome" class="screen">
-    <div class="welcome-badge">✨ Banca Digital Real · Supabase</div>
-    <h1 style="font-family:'Sora';font-size:2rem;font-weight:800;text-align:center;line-height:1.2;">¡Bienvenido/a a<br><span style="color:#facc15;">AuraBank</span>!</h1>
+  <!-- ══ SETUP GUIDE (si hay error de configuración) ══ -->
+  <div id="s-setup" class="screen">
+    <div class="setup-box">
+      <div style="font-size:1.5rem;margin-bottom:12px;">⚠️</div>
+      <div style="font-family:'Sora';font-weight:700;margin-bottom:8px;">Configuración requerida</div>
+      <div id="setup-msg" style="font-size:0.8rem;color:var(--text-2);line-height:1.8;"></div>
+      <button class="btn-gold" onclick="goTo('welcome')" style="margin-top:20px;">Intentar de nuevo</button>
+    </div>
+  </div>
 
-    <div class="welcome-gift-card" style="margin-top:24px;">
-      <div style="font-size:0.8rem;color:#888;margin-bottom:8px;">Te regalamos</div>
+  <!-- ══ WELCOME ══ -->
+  <div id="s-welcome" class="screen">
+    <div class="welcome-pill">✦ Banca Digital con Supabase</div>
+
+    <h1 class="welcome-hero">
+      Bienvenido a<br><span style="color:var(--gold);">AuraBank</span>
+    </h1>
+
+    <div class="gift-card">
+      <div style="font-size:0.72rem;color:var(--text-2);margin-bottom:6px;">Bono de bienvenida</div>
       <div class="gift-amount">$100.00</div>
-      <div style="color:#888;font-size:0.8rem;margin-top:4px;">USD de saldo inicial</div>
-      <div style="background:#1f2a10;border-radius:10px;padding:10px 14px;margin-top:14px;font-size:0.78rem;color:#aaa;line-height:1.8;">
-        <strong style="color:#facc15;">📋 Sistema de credenciales:</strong><br>
-        Usuario = tu <strong>cédula</strong><br>
-        Contraseña = <strong>cédula + inicial del nombre</strong><br>
-        <span style="color:#666;">Ej: Cédula <strong style="color:#fff;">0921345678</strong>, Nombre <strong style="color:#fff;">Luis</strong> → clave: <strong style="color:#22c55e;">0921345678L</strong></span>
+      <div style="font-size:0.72rem;color:var(--text-2);margin-top:3px;">USD de saldo inicial</div>
+      <div class="cred-info">
+        <strong style="color:var(--gold);">Sistema de credenciales</strong><br>
+        Usuario → tu <strong style="color:#fff;">número de cédula</strong><br>
+        Contraseña → <strong style="color:#fff;">cédula + inicial del nombre</strong><br>
+        <span style="color:var(--text-3);">
+          Ejemplo · cédula <strong style="color:#aaa;">0921345678</strong>,
+          nombre <strong style="color:#aaa;">Luis</strong>
+          → clave: <strong style="color:var(--green);">0921345678L</strong>
+        </span>
       </div>
     </div>
 
-    <button class="btn-primary" onclick="goTo('register')" style="margin-top:8px;">Crear mi cuenta gratis</button>
-    <button class="btn-secondary" onclick="goTo('login')">Ya tengo cuenta → Ingresar</button>
+    <button class="btn-gold" onclick="goTo('register')">Crear mi cuenta gratis</button>
+    <button class="btn-outline" onclick="goTo('login')">Ya tengo cuenta → Ingresar</button>
   </div>
 
-  <!-- ═══ REGISTER ═══ -->
-  <div id="screen-register" class="screen">
-    <div style="padding:30px 24px 0; flex:1; display:flex; flex-direction:column; justify-content:flex-end;">
-      <div class="bottom-card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-          <h2 style="font-family:'Sora';font-weight:700;font-size:1.3rem;">Crear Cuenta Real</h2>
-          <button class="btn-ghost" onclick="goTo('welcome')">✕</button>
-        </div>
-
-        <label class="input-label">Número de Cédula / DNI</label>
-        <input id="reg-cedula" type="text" class="input-field" placeholder="Ej: 0921345678" inputmode="numeric" />
-
-        <label class="input-label">Nombre Completo</label>
-        <input id="reg-name" type="text" class="input-field" placeholder="Ej: Luis Fernando Avilez" oninput="previewCreds()" />
-
-        <label class="input-label">Teléfono</label>
-        <input id="reg-phone" type="text" class="input-field" placeholder="Ej: 0991234567" inputmode="tel" />
-
-        <!-- Preview de credenciales generadas -->
-        <div class="cred-box" id="cred-preview" style="display:none;">
-          <div style="font-size:0.75rem;color:#22c55e;font-weight:700;margin-bottom:8px;">✅ Tus credenciales generadas:</div>
-          <div class="cred-row"><span style="color:#888;">Usuario:</span> <span class="cred-val" id="prev-user">—</span></div>
-          <div class="cred-row" style="margin-bottom:0;"><span style="color:#888;">Contraseña:</span> <span class="cred-val" id="prev-pass">—</span></div>
-        </div>
-
-        <button class="btn-primary" onclick="handleRegister()" style="margin-top:18px;">
-          <iconify-icon icon="material-symbols:person-add"></iconify-icon> Crear mi cuenta
+  <!-- ══ REGISTER ══ -->
+  <div id="s-register" class="screen" style="justify-content:flex-end;background:linear-gradient(180deg,#000 0%,#040400 100%);">
+    <div class="bottom-sheet">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;">
+        <div style="font-size:1.2rem;font-weight:700;">Nueva Cuenta</div>
+        <button class="btn-ghost" onclick="goTo('welcome')">
+          <iconify-icon icon="material-symbols:close"></iconify-icon>
         </button>
       </div>
-    </div>
-  </div>
 
-  <!-- ═══ LOGIN ═══ -->
-  <div id="screen-login" class="screen">
-    <div style="padding:30px 24px 0; flex:1; display:flex; flex-direction:column; justify-content:flex-end;">
-      <div class="bottom-card">
-        <div style="text-align:center;margin-bottom:20px;">
-          <div style="font-family:'Sora';font-size:2rem;font-weight:800;color:#facc15;">AuraBank</div>
-          <div style="font-size:0.78rem;color:#555;margin-top:4px;">Banca respaldada por Supabase</div>
+      <label class="field-label">Número de Cédula / DNI</label>
+      <input id="r-cedula" type="text" class="field-input" placeholder="Ej: 0921345678" inputmode="numeric" oninput="previewCreds()" />
+
+      <label class="field-label">Nombre Completo</label>
+      <input id="r-name" type="text" class="field-input" placeholder="Ej: Luis Fernando Avilez" oninput="previewCreds()" />
+
+      <label class="field-label">Teléfono <span style="color:var(--text-3);">(opcional)</span></label>
+      <input id="r-phone" type="text" class="field-input" placeholder="Ej: 0991234567" inputmode="tel" />
+
+      <div class="cred-preview" id="r-preview" style="display:none;">
+        <div style="font-size:0.72rem;color:var(--green);font-weight:700;margin-bottom:10px;">Tus credenciales de acceso:</div>
+        <div class="cred-row">
+          <span style="color:var(--text-2);">Usuario</span>
+          <span class="cred-val" id="r-prev-u">—</span>
         </div>
-
-        <div class="login-hint">
-          <strong style="color:#777;">Usuario</strong> = tu número de cédula &nbsp;|&nbsp; <strong style="color:#777;">Contraseña</strong> = cédula + inicial del nombre<br>
-          <span style="color:#444;">Ejemplo: usuario <strong style="color:#aaa;">0921345678</strong>, clave <strong style="color:#aaa;">0921345678L</strong></span>
+        <div class="cred-row" style="margin-bottom:0;">
+          <span style="color:var(--text-2);">Contraseña</span>
+          <span class="cred-val" id="r-prev-p">—</span>
         </div>
-
-        <label class="input-label">Cédula / DNI</label>
-        <input id="login-user" type="text" class="input-field" placeholder="Tu número de cédula" inputmode="numeric" />
-
-        <label class="input-label" style="margin-top:12px;">Contraseña</label>
-        <input id="login-pass" type="password" class="input-field" placeholder="cédula + inicial del nombre" style="margin-top:6px;" />
-
-        <button class="btn-primary" onclick="handleLogin()" style="margin-top:18px;">
-          <iconify-icon icon="material-symbols:login"></iconify-icon> Ingresar
-        </button>
-        <button class="btn-secondary" onclick="goTo('welcome')">← Volver</button>
+        <div style="font-size:0.68rem;color:var(--text-3);margin-top:10px;line-height:1.7;">
+          ⚠️ Guarda estas credenciales. No se pueden recuperar si las pierdes.
+        </div>
       </div>
+
+      <button class="btn-gold" id="btn-register" onclick="handleRegister()" style="margin-top:18px;">
+        <iconify-icon icon="material-symbols:person-add"></iconify-icon> Crear cuenta
+      </button>
     </div>
   </div>
 
-  <!-- ═══ DASHBOARD ═══ -->
-  <div id="screen-dashboard" class="screen">
+  <!-- ══ LOGIN ══ -->
+  <div id="s-login" class="screen" style="justify-content:flex-end;background:linear-gradient(180deg,#000 0%,#040400 100%);">
+    <div class="bottom-sheet">
+      <div style="text-align:center;margin-bottom:22px;">
+        <div style="font-size:1.8rem;font-weight:800;color:var(--gold);">AuraBank</div>
+        <div style="font-size:0.72rem;color:var(--text-3);margin-top:3px;">Ingresa con tu cédula</div>
+      </div>
+
+      <div style="background:#0d0d0d;border-radius:12px;padding:11px 14px;margin-bottom:16px;font-size:0.73rem;color:var(--text-3);line-height:1.8;">
+        Usuario = <strong style="color:#666;">cédula</strong> &nbsp;|&nbsp;
+        Contraseña = <strong style="color:#666;">cédula + inicial nombre</strong><br>
+        <span style="color:var(--text-3);">Ej: <strong style="color:#555;">0921345678</strong> · clave: <strong style="color:#555;">0921345678L</strong></span>
+      </div>
+
+      <label class="field-label">Cédula / DNI</label>
+      <input id="l-user" type="text" class="field-input" placeholder="Tu número de cédula" inputmode="numeric"
+        onkeydown="if(event.key==='Enter')document.getElementById('l-pass').focus()" />
+
+      <label class="field-label">Contraseña</label>
+      <input id="l-pass" type="password" class="field-input" placeholder="cédula + inicial del nombre"
+        onkeydown="if(event.key==='Enter')handleLogin()" />
+
+      <button class="btn-gold" id="btn-login" onclick="handleLogin()" style="margin-top:18px;">
+        <iconify-icon icon="material-symbols:login"></iconify-icon> Ingresar
+      </button>
+      <button class="btn-outline" onclick="goTo('welcome')">← Volver</button>
+    </div>
+  </div>
+
+  <!-- ══ DASHBOARD ══ -->
+  <div id="s-dashboard" class="screen">
     <div class="dash-header">
       <div>
-        <div style="font-family:'Sora';font-weight:800;font-size:1.3rem;color:#facc15;">AuraBank</div>
-        <div style="font-size:0.78rem;color:#555;" id="dash-greeting">Cargando...</div>
+        <div style="font-size:1.3rem;font-weight:800;color:var(--gold);">AuraBank</div>
+        <div id="d-greeting" style="font-size:0.75rem;color:var(--text-2);margin-top:1px;"></div>
       </div>
-      <button class="btn-ghost" onclick="handleLogout()" style="color:#666;">
-        <iconify-icon icon="material-symbols:logout" style="font-size:1.3rem;"></iconify-icon>
+      <button class="btn-ghost" onclick="handleLogout()">
+        <iconify-icon icon="material-symbols:logout" style="font-size:1.2rem;"></iconify-icon>
       </button>
     </div>
 
+    <!-- Balance card -->
     <div class="balance-card">
-      <div style="color:#777;font-size:0.72rem;text-transform:uppercase;letter-spacing:1px;">Saldo Disponible</div>
-      <div class="balance-amount" id="dash-balance-wrap">$<span id="dash-balance">0.00</span></div>
-      <div style="display:flex;justify-content:space-between;margin-top:10px;">
-        <div style="color:#facc15;font-size:0.78rem;" id="dash-cedula"></div>
-        <div id="realtime-dot" style="display:flex;align-items:center;gap:5px;font-size:0.7rem;color:#555;">
-          <span style="width:6px;height:6px;background:#22c55e;border-radius:50%;display:inline-block;"></span> En vivo
+      <div class="balance-label">Saldo disponible</div>
+      <div class="balance-amount" id="d-balance-el">
+        $<span id="d-balance">0.00</span>
+      </div>
+      <div class="balance-footer">
+        <div style="font-size:0.72rem;color:var(--gold-dim);" id="d-cedula"></div>
+        <div class="live-dot">
+          <div class="live-dot-inner"></div> En vivo
         </div>
       </div>
     </div>
 
-    <!-- Acciones rápidas -->
-    <div class="quick-actions">
-      <div class="action-tile" onclick="goTo('transfer')">
-        <iconify-icon icon="material-symbols:send-money" style="color:#facc15;font-size:1.7rem;"></iconify-icon>
-        <span style="font-size:0.68rem;color:#888;">Enviar</span>
-      </div>
-      <div class="action-tile" onclick="goTo('withdraw')">
-        <iconify-icon icon="material-symbols:account-balance" style="color:#3b82f6;font-size:1.7rem;"></iconify-icon>
-        <span style="font-size:0.68rem;color:#888;">Retirar</span>
-      </div>
-      <div class="action-tile" onclick="fetchTransactions()">
-        <iconify-icon icon="material-symbols:refresh" style="color:#a855f7;font-size:1.7rem;"></iconify-icon>
-        <span style="font-size:0.68rem;color:#888;">Actualizar</span>
-      </div>
-      <div class="action-tile" onclick="showProfile()">
-        <iconify-icon icon="material-symbols:person" style="color:#f97316;font-size:1.7rem;"></iconify-icon>
-        <span style="font-size:0.68rem;color:#888;">Perfil</span>
-      </div>
-    </div>
-
-    <!-- Transacciones -->
-    <div style="padding:4px 16px 0;">
-      <div style="font-family:'Sora';font-size:0.85rem;color:#666;margin-bottom:12px;display:flex;justify-content:space-between;">
-        <span>Movimientos recientes</span>
-        <span id="tx-count" style="color:#333;font-size:0.75rem;"></span>
-      </div>
-      <div id="tx-list"></div>
-    </div>
-
-    <!-- Bottom Nav -->
-    <div class="bottom-nav">
-      <div class="nav-item active">
-        <iconify-icon icon="material-symbols:home" style="font-size:1.4rem;color:#facc15;"></iconify-icon>
-        <span style="color:#facc15;">Inicio</span>
-      </div>
-      <div class="nav-item" onclick="fetchTransactions()">
-        <iconify-icon icon="material-symbols:history" style="font-size:1.4rem;color:#555;"></iconify-icon>
-        <span>Historial</span>
-      </div>
-      <div class="nav-item" onclick="goTo('transfer')">
-        <iconify-icon icon="material-symbols:send" style="font-size:1.4rem;color:#555;"></iconify-icon>
+    <!-- Quick actions -->
+    <div class="quick-grid">
+      <div class="quick-tile" onclick="goTo('transfer')">
+        <iconify-icon icon="material-symbols:send-money" style="color:var(--gold);font-size:1.6rem;"></iconify-icon>
         <span>Enviar</span>
       </div>
-      <div class="nav-item" onclick="handleLogout()">
-        <iconify-icon icon="material-symbols:logout" style="font-size:1.4rem;color:#555;"></iconify-icon>
+      <div class="quick-tile" onclick="goTo('withdraw')">
+        <iconify-icon icon="material-symbols:account-balance" style="color:var(--blue);font-size:1.6rem;"></iconify-icon>
+        <span>Retirar</span>
+      </div>
+      <div class="quick-tile" onclick="fetchTx(true)">
+        <iconify-icon icon="material-symbols:refresh" style="color:#a855f7;font-size:1.6rem;"></iconify-icon>
+        <span>Actualizar</span>
+      </div>
+      <div class="quick-tile" onclick="showProfile()">
+        <iconify-icon icon="material-symbols:person" style="color:#f97316;font-size:1.6rem;"></iconify-icon>
+        <span>Perfil</span>
+      </div>
+    </div>
+
+    <!-- Transactions -->
+    <div class="section-header" style="margin-top:4px;">
+      <span class="section-title">Movimientos recientes</span>
+      <span id="d-tx-count" style="font-size:0.72rem;color:var(--text-3);"></span>
+    </div>
+    <div id="d-tx-list"></div>
+
+    <!-- Bottom nav -->
+    <div class="bottom-nav">
+      <div class="nav-tab active">
+        <iconify-icon icon="material-symbols:home-filled" style="font-size:1.4rem;color:var(--gold);"></iconify-icon>
+        <span style="color:var(--gold);">Inicio</span>
+      </div>
+      <div class="nav-tab" onclick="fetchTx(true)">
+        <iconify-icon icon="material-symbols:history" style="font-size:1.4rem;color:var(--text-3);"></iconify-icon>
+        <span>Historial</span>
+      </div>
+      <div class="nav-tab" onclick="goTo('transfer')">
+        <iconify-icon icon="material-symbols:send" style="font-size:1.4rem;color:var(--text-3);"></iconify-icon>
+        <span>Enviar</span>
+      </div>
+      <div class="nav-tab" onclick="handleLogout()">
+        <iconify-icon icon="material-symbols:logout" style="font-size:1.4rem;color:var(--text-3);"></iconify-icon>
         <span>Salir</span>
       </div>
     </div>
   </div>
 
-  <!-- ═══ TRANSFERENCIA LOCAL ═══ -->
-  <div id="screen-transfer" class="screen">
-    <div style="padding:20px 16px 40px; overflow-y:auto; flex:1;">
-      <button class="btn-ghost" onclick="goTo('dashboard')" style="margin-bottom:16px;">
+  <!-- ══ TRANSFERENCIA ══ -->
+  <div id="s-transfer" class="screen">
+    <div class="page-scroll">
+      <button class="btn-ghost" onclick="goTo('dashboard')" style="margin-bottom:14px;">
         <iconify-icon icon="material-symbols:arrow-back"></iconify-icon> Volver
       </button>
-      <h2 style="font-family:'Sora';font-size:1.2rem;font-weight:700;margin-bottom:4px;">Transferir dinero</h2>
-      <p style="font-size:0.78rem;color:#555;margin-bottom:20px;">Envía a cualquier usuario de AuraBank</p>
 
-      <!-- Saldo disponible -->
-      <div style="background:#111;border-radius:14px;padding:14px 16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:0.8rem;color:#666;">Disponible</span>
-        <span style="font-family:'Sora';font-weight:700;color:#facc15;">$<span id="t-balance">0.00</span></span>
+      <div style="font-size:1.15rem;font-weight:700;margin-bottom:3px;">Transferir dinero</div>
+      <div style="font-size:0.75rem;color:var(--text-2);margin-bottom:18px;">A cualquier usuario de AuraBank</div>
+
+      <div class="avail-bar">
+        <span style="font-size:0.78rem;color:var(--text-2);">Disponible</span>
+        <span style="font-family:'JetBrains Mono';font-weight:600;color:var(--gold);">
+          $<span id="t-bal">0.00</span>
+        </span>
       </div>
 
-      <label class="input-label">Cédula del Destinatario</label>
-      <input id="t-cedula" type="text" class="input-field" placeholder="Número de cédula del usuario" inputmode="numeric" oninput="updateTransferPreview()" />
+      <label class="field-label">Cédula del destinatario</label>
+      <input id="t-cedula" type="text" class="field-input" placeholder="Número de cédula"
+        inputmode="numeric" oninput="updateTxPreview()" />
 
-      <label class="input-label">Monto a Enviar ($)</label>
-      <input id="t-amount" type="number" class="input-field" placeholder="0.00" oninput="updateTransferPreview()" />
+      <label class="field-label">Monto a enviar (USD)</label>
+      <input id="t-amount" type="number" class="field-input" placeholder="0.00"
+        inputmode="decimal" step="0.01" oninput="updateTxPreview()" />
 
-      <!-- Preview -->
-      <div class="preview-card" id="transfer-preview" style="display:none;">
-        <div style="font-size:0.78rem;color:#666;margin-bottom:10px;">Resumen</div>
-        <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:8px;">
-          <span style="color:#888;">Enviando</span>
-          <span style="font-family:'Sora';font-weight:700;color:#fff;">$<span id="prev-amount">0.00</span></span>
+      <div class="preview-box" id="t-preview">
+        <div style="font-size:0.72rem;color:var(--text-3);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px;">Resumen</div>
+        <div class="preview-row">
+          <span style="color:var(--text-2);">Enviando</span>
+          <span style="font-family:'JetBrains Mono';font-weight:600;">$<span id="t-prev-amt">0.00</span></span>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:8px;">
-          <span style="color:#888;">A cédula</span>
-          <span style="color:#facc15;" id="prev-dest">—</span>
+        <div class="preview-row">
+          <span style="color:var(--text-2);">A cédula</span>
+          <span style="color:var(--gold);" id="t-prev-dest">—</span>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:0.85rem;">
-          <span style="color:#888;">Saldo tras transferir</span>
-          <span style="color:#ef4444;" id="prev-after">$0.00</span>
+        <div class="preview-row" style="margin-bottom:0;">
+          <span style="color:var(--text-2);">Saldo restante</span>
+          <span id="t-prev-rest" style="font-family:'JetBrains Mono';">$0.00</span>
         </div>
       </div>
 
-      <button class="btn-primary" onclick="processTransfer()" style="margin-top:10px;">
-        <iconify-icon icon="material-symbols:send"></iconify-icon> Confirmar Transferencia
+      <button class="btn-gold" onclick="processTransfer()" style="margin-top:14px;">
+        <iconify-icon icon="material-symbols:send"></iconify-icon> Confirmar transferencia
       </button>
     </div>
   </div>
 
-  <!-- ═══ RETIRO INTERNACIONAL ═══ -->
-  <div id="screen-withdraw" class="screen">
-    <div style="padding:20px 16px 40px; overflow-y:auto; flex:1;">
-      <button class="btn-ghost" onclick="goTo('dashboard')" style="margin-bottom:16px;">
+  <!-- ══ RETIRO INTERNACIONAL ══ -->
+  <div id="s-withdraw" class="screen">
+    <div class="page-scroll">
+      <button class="btn-ghost" onclick="goTo('dashboard')" style="margin-bottom:14px;">
         <iconify-icon icon="material-symbols:arrow-back"></iconify-icon> Volver
       </button>
-      <h2 style="font-family:'Sora';font-size:1.2rem;font-weight:700;margin-bottom:4px;">Retiro Internacional Swift</h2>
-      <p style="font-size:0.78rem;color:#555;margin-bottom:20px;">Envía tus fondos a bancos del exterior</p>
 
-      <label class="input-label">País de Destino</label>
-      <select id="w-country" class="input-field" onchange="updateBanks()">
+      <div style="font-size:1.15rem;font-weight:700;margin-bottom:3px;">Retiro Internacional</div>
+      <div style="font-size:0.75rem;color:var(--text-2);margin-bottom:18px;">Red SWIFT · procesamiento 24-48 h</div>
+
+      <label class="field-label">País de destino</label>
+      <select id="w-country" class="field-input" onchange="updateBanks()">
         <option value="USA">🇺🇸 Estados Unidos</option>
         <option value="España">🇪🇸 España</option>
         <option value="México">🇲🇽 México</option>
         <option value="Colombia">🇨🇴 Colombia</option>
         <option value="Argentina">🇦🇷 Argentina</option>
+        <option value="Perú">🇵🇪 Perú</option>
+        <option value="Chile">🇨🇱 Chile</option>
       </select>
 
-      <label class="input-label">Banco Receptor</label>
-      <select id="w-bank" class="input-field"></select>
+      <label class="field-label">Banco receptor</label>
+      <select id="w-bank" class="field-input"></select>
 
-      <label class="input-label">Número de Cuenta / IBAN</label>
-      <input id="w-account" type="text" class="input-field" placeholder="Ej: US64XXXX0000000000000000" />
+      <label class="field-label">Número de cuenta / IBAN</label>
+      <input id="w-account" type="text" class="field-input" placeholder="Ej: US64XXXX0000000000000000" />
 
-      <label class="input-label">Monto a Retirar ($)</label>
-      <input id="w-amount" type="number" class="input-field" placeholder="0.00" oninput="calcWithdrawFee()" />
+      <label class="field-label">Monto a retirar (USD)</label>
+      <input id="w-amount" type="number" class="field-input" placeholder="0.00"
+        inputmode="decimal" oninput="calcFee()" />
 
-      <div style="background:#1a1000;border:1px solid #2a2010;border-radius:14px;padding:14px 16px;margin-top:16px;margin-bottom:20px;">
-        <div style="display:flex;justify-content:space-between;font-size:0.8rem;margin-bottom:8px;">
-          <span style="color:#888;">Comisión Red SWIFT:</span>
-          <span style="color:#ef4444;font-weight:700;">$2.50</span>
+      <div class="fee-box">
+        <div style="display:flex;justify-content:space-between;font-size:0.78rem;margin-bottom:8px;">
+          <span style="color:var(--text-2);">Comisión SWIFT</span>
+          <span style="color:var(--red);">$2.50</span>
         </div>
         <div style="display:flex;justify-content:space-between;font-size:0.92rem;font-weight:700;">
-          <span>Total a debitar:</span>
-          <span id="w-total" style="color:#facc15;">$0.00</span>
+          <span>Total a debitar</span>
+          <span id="w-total" style="color:var(--gold);">$0.00</span>
         </div>
       </div>
 
-      <button class="btn-primary" onclick="processWithdrawal()">
-        <iconify-icon icon="material-symbols:account-balance"></iconify-icon> Procesar Retiro
+      <button class="btn-gold" onclick="processWithdrawal()">
+        <iconify-icon icon="material-symbols:account-balance"></iconify-icon> Procesar retiro
       </button>
     </div>
   </div>
 
-  <!-- ═══ SUCCESS / COMPROBANTE ═══ -->
-  <div id="screen-success" class="screen">
-    <div style="width:100%;display:flex;flex-direction:column;align-items:center;padding:32px 20px 40px;">
+  <!-- ══ SUCCESS ══ -->
+  <div id="s-success" class="screen">
+    <div style="width:100%;display:flex;flex-direction:column;align-items:center;padding:36px 20px 50px;">
       <div class="success-icon">✅</div>
-      <h2 style="font-family:'Sora';font-size:1.5rem;font-weight:800;text-align:center;">¡Transferencia enviada!</h2>
-      <p style="color:#666;font-size:0.85rem;text-align:center;margin-top:8px;">Tu dinero está en camino</p>
+      <div style="font-size:1.5rem;font-weight:800;text-align:center;">¡Transferencia exitosa!</div>
+      <div style="font-size:0.82rem;color:var(--text-2);margin-top:6px;text-align:center;">
+        Tu dinero está en camino
+      </div>
 
       <div class="receipt-card">
         <div style="text-align:center;margin-bottom:16px;">
-          <div style="font-size:0.7rem;color:#555;text-transform:uppercase;letter-spacing:1px;">Monto enviado</div>
-          <div style="font-family:'Sora';font-size:2.2rem;font-weight:800;color:#facc15;" id="receipt-amount">$0.00</div>
+          <div style="font-size:0.65rem;color:var(--text-3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Monto enviado</div>
+          <div id="rc-amount" style="font-size:2.2rem;font-weight:800;color:var(--gold);font-family:'JetBrains Mono';">$0.00</div>
         </div>
         <div class="receipt-row">
-          <span style="color:#888;">ID Transacción</span>
-          <span id="receipt-id" style="font-size:0.75rem;color:#555;">—</span>
+          <span style="color:var(--text-2);">ID de operación</span>
+          <span id="rc-id" style="font-family:'JetBrains Mono';font-size:0.72rem;color:var(--text-2);">—</span>
         </div>
         <div class="receipt-row">
-          <span style="color:#888;">Destinatario</span>
-          <span id="receipt-dest" style="color:#fff;">—</span>
+          <span style="color:var(--text-2);">Destinatario</span>
+          <span id="rc-dest" style="font-size:0.85rem;">—</span>
         </div>
         <div class="receipt-row">
-          <span style="color:#888;">Fecha</span>
-          <span id="receipt-date" style="font-size:0.78rem;color:#777;">—</span>
+          <span style="color:var(--text-2);">Fecha</span>
+          <span id="rc-date" style="font-size:0.75rem;color:var(--text-2);">—</span>
         </div>
         <div class="receipt-row">
-          <span style="color:#888;">Estado</span>
-          <span style="color:#22c55e;font-weight:700;">✓ Completado</span>
+          <span style="color:var(--text-2);">Estado</span>
+          <span style="color:var(--green);font-weight:700;font-size:0.85rem;">✓ Completado</span>
         </div>
       </div>
 
-      <button class="btn-primary" onclick="goTo('dashboard')" style="margin-top:20px;max-width:300px;">
-        Volver al Inicio
+      <button class="btn-gold" onclick="goTo('dashboard')" style="margin-top:22px;max-width:320px;">
+        Volver al inicio
       </button>
     </div>
   </div>
 
-</div><!-- /app-shell -->
+</div><!-- /shell -->
 
 <script>
-// ═══════════════════════════════════════════════════════════
-//  SUPABASE CONFIG
-// ═══════════════════════════════════════════════════════════
-const SUPABASE_URL = 'https://vndmfizzyjlmwqcejrli.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_TYzeg1Pajv7EF20rSfxqQg_iA2arQV2';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// ═══════════════════════════════════════════════════════════════
+//  CONFIGURACIÓN SUPABASE
+//  Reemplaza con tu URL y ANON KEY desde:
+//  Supabase → Settings → API → Project URL & anon public
+// ═══════════════════════════════════════════════════════════════
+const SB_URL = 'https://vndmfizzyjlmwqcejrli.supabase.co';
+const SB_KEY = 'sb_publishable_TYzeg1Pajv7EF20rSfxqQg_iA2arQV2';
 
-// Estado global
-let CURRENT_USER = null;
-let realtimeChannel = null;
-let lastReceiptData = null;
+let sb;            // cliente supabase
+let ME = null;     // usuario actual
+let rtChannel = null;
+let isLoading = false;
 
-const bankDB = {
-  "USA":      ["JP Morgan Chase","Wells Fargo","Bank of America","Citibank"],
-  "España":   ["BBVA España","Banco Santander","CaixaBank","Bankinter"],
-  "México":   ["Banorte","Citibanamex","BBVA México","HSBC México"],
-  "Colombia": ["Bancolombia","Davivienda","Banco de Bogotá","Nequi"],
-  "Argentina":["Banco Galicia","Banco Nación","Santander Río","Brubank"]
+const BANKS = {
+  USA:       ['JP Morgan Chase','Wells Fargo','Bank of America','Citibank'],
+  España:    ['BBVA España','Banco Santander','CaixaBank','Bankinter'],
+  México:    ['Banorte','Citibanamex','BBVA México','HSBC México'],
+  Colombia:  ['Bancolombia','Davivienda','Banco de Bogotá','Nequi'],
+  Argentina: ['Banco Galicia','Banco Nación','Santander Río','Brubank'],
+  Perú:      ['BCP','Interbank','BBVA Perú','Scotiabank Perú'],
+  Chile:     ['BancoEstado','Santander Chile','BCI','Banco de Chile']
 };
 
-// ═══════════════════════════════════════════════════════════
-//  NAVEGACIÓN
-// ═══════════════════════════════════════════════════════════
-function goTo(screen) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  const el = document.getElementById('screen-' + screen);
-  if (el) { el.classList.add('active'); el.scrollTop = 0; }
-  if (screen === 'withdraw') updateBanks();
-  if (screen === 'transfer' && CURRENT_USER) {
-    document.getElementById('t-balance').textContent = parseFloat(CURRENT_USER.balance).toFixed(2);
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-//  UI HELPERS
-// ═══════════════════════════════════════════════════════════
-function showToast(type, title, msg) {
-  const container = document.getElementById('toast-container');
-  const t = document.createElement('div');
-  const colors = { success:'#22c55e', error:'#ef4444', info:'#3b82f6', warning:'#f59e0b' };
-  const icons  = { success:'✓', error:'✕', info:'ℹ', warning:'⚠' };
-  t.className = 'toast';
-  t.style.borderLeftColor = colors[type] || '#555';
-  t.innerHTML = `
-    <span style="font-size:1.1rem;color:${colors[type]}">${icons[type]||'•'}</span>
-    <div style="flex:1">
-      <div style="font-weight:700;font-size:0.85rem;">${title}</div>
-      <div style="font-size:0.75rem;color:#777;margin-top:2px;">${msg}</div>
-    </div>`;
-  container.appendChild(t);
-  requestAnimationFrame(() => { setTimeout(() => t.classList.add('show'), 10); });
-  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 350); }, 4000);
-}
-
-function showProcessing(title, steps, durationMs) {
-  return new Promise(resolve => {
-    const overlay = document.getElementById('processing-overlay');
-    document.getElementById('proc-title').textContent = title;
-    const stepsDiv = document.getElementById('proc-steps');
-    stepsDiv.innerHTML = steps.map((s,i) =>
-      `<div class="proc-step" id="pstep-${i}">${s}</div>`).join('');
-    overlay.classList.add('active');
-
-    let i = 0;
-    const ms = durationMs / (steps.length + 1);
-    const tick = setInterval(() => {
-      if (i > 0 && document.getElementById(`pstep-${i-1}`)) {
-        const prev = document.getElementById(`pstep-${i-1}`);
-        prev.classList.remove('active');
-        prev.classList.add('done');
-      }
-      if (i < steps.length) {
-        const cur = document.getElementById(`pstep-${i}`);
-        if (cur) cur.classList.add('active');
-        i++;
-      } else {
-        clearInterval(tick);
-        setTimeout(() => { overlay.classList.remove('active'); resolve(); }, 400);
-      }
-    }, ms);
-  });
-}
-
-function formatDate(ts) {
-  if (!ts) return '—';
-  const d = new Date(ts);
-  return d.toLocaleDateString('es-EC', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
-}
-
-// ═══════════════════════════════════════════════════════════
-//  INICIO Y SESIÓN
-// ═══════════════════════════════════════════════════════════
-window.onload = async () => {
+// ═══════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════
+window.addEventListener('load', async () => {
   updateBanks();
-  // Escuchar cambios de sesión (muy importante para Supabase)
-  supabase.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'SIGNED_IN' && session) {
-      // Solo carga si no tenemos usuario ya cargado
-      if (!CURRENT_USER) await loadUserProfile(session.user.id);
-    } else if (event === 'SIGNED_OUT') {
-      CURRENT_USER = null;
+
+  // Inicializar cliente Supabase
+  try {
+    sb = window.supabase.createClient(SB_URL, SB_KEY, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession:   true,
+        detectSessionInUrl: false
+      }
+    });
+  } catch(e) {
+    showSetup('No se pudo inicializar Supabase. Verifica la URL y la ANON KEY en el código.');
+    return;
+  }
+
+  // Escuchar cambios de sesión
+  sb.auth.onAuthStateChange(async (event, session) => {
+    console.log('Auth event:', event);
+    if (event === 'SIGNED_IN' && session && !ME) {
+      await loadProfile(session.user.id);
+    }
+    if (event === 'SIGNED_OUT') {
+      ME = null;
+    }
+    if (event === 'TOKEN_REFRESHED') {
+      console.log('Token renovado automáticamente');
     }
   });
 
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session) {
-    await loadUserProfile(session.user.id);
-  } else {
-    setTimeout(() => goTo('welcome'), 1200);
-  }
-};
+  // Verificar sesión existente
+  try {
+    const { data: { session }, error } = await sb.auth.getSession();
+    if (error) throw error;
 
-// ═══════════════════════════════════════════════════════════
-//  CREDENCIALES HELPER
-// ═══════════════════════════════════════════════════════════
-function buildPassword(cedula, name) {
-  if (!cedula || !name) return '';
-  return cedula + (name.trim().charAt(0).toUpperCase());
+    if (session?.user) {
+      await loadProfile(session.user.id);
+    } else {
+      setTimeout(() => goTo('welcome'), 1400);
+    }
+  } catch(e) {
+    console.error('getSession error:', e);
+    setTimeout(() => goTo('welcome'), 1400);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  NAVEGACIÓN
+// ═══════════════════════════════════════════════════════════════
+function goTo(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById('s-' + id);
+  if (!el) return;
+  el.classList.add('active');
+  el.scrollTop = 0;
+
+  if (id === 'withdraw') updateBanks();
+  if (id === 'transfer' && ME) {
+    document.getElementById('t-bal').textContent = fmtMoney(ME.balance);
+    document.getElementById('t-preview').style.display = 'none';
+  }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════════
+function fmtMoney(n) {
+  return parseFloat(n || 0).toFixed(2);
+}
+
+function fmtDate(ts) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleDateString('es-EC', {
+    day:'2-digit', month:'short', year:'numeric',
+    hour:'2-digit', minute:'2-digit'
+  });
+}
+
+function buildPass(cedula, name) {
+  if (!cedula || !name) return '';
+  const initial = name.trim().charAt(0).toUpperCase();
+  return cedula.trim() + initial;
+}
+
+function showSetup(msg) {
+  document.getElementById('setup-msg').innerHTML = msg;
+  goTo('setup');
+}
+
+// ── TOAST ──────────────────────────────────────────────────────
+function toast(type, title, msg) {
+  const wrap = document.getElementById('toast-wrap');
+  const icons = { success:'✓', error:'✕', info:'ℹ', warning:'⚠' };
+  const colors= { success:'#22c55e', error:'#dc2626', info:'#3b82f6', warning:'#f59e0b' };
+
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.style.borderLeft = `3px solid ${colors[type]||'#555'}`;
+  t.innerHTML = `
+    <span class="toast-icon" style="color:${colors[type]}">${icons[type]||'•'}</span>
+    <div>
+      <div class="toast-title">${title}</div>
+      <div class="toast-msg">${msg}</div>
+    </div>`;
+  t.onclick = () => t.remove();
+  wrap.appendChild(t);
+
+  requestAnimationFrame(() => setTimeout(() => t.classList.add('in'), 10));
+  setTimeout(() => {
+    t.classList.remove('in');
+    setTimeout(() => t.remove(), 350);
+  }, 4500);
+}
+
+// ── PROCESSING OVERLAY ─────────────────────────────────────────
+function showProc(title, steps, ms) {
+  return new Promise(resolve => {
+    const ol = document.getElementById('proc-overlay');
+    document.getElementById('proc-title').textContent = title;
+    const sd = document.getElementById('proc-steps');
+
+    sd.innerHTML = steps.map((s, i) => `
+      <div class="proc-step" id="ps-${i}">
+        <div class="proc-dot"></div>
+        <span>${s}</span>
+      </div>`).join('');
+
+    ol.classList.add('on');
+
+    let i = 0;
+    const interval = ms / (steps.length + 1);
+
+    const tick = setInterval(() => {
+      if (i > 0) {
+        const prev = document.getElementById(`ps-${i-1}`);
+        if (prev) { prev.classList.remove('cur'); prev.classList.add('done'); }
+      }
+      if (i < steps.length) {
+        const cur = document.getElementById(`ps-${i}`);
+        if (cur) cur.classList.add('cur');
+        i++;
+      } else {
+        clearInterval(tick);
+        setTimeout(() => { ol.classList.remove('on'); resolve(); }, 450);
+      }
+    }, interval);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CREDENCIALES PREVIEW
+// ═══════════════════════════════════════════════════════════════
 function previewCreds() {
-  const cedula = document.getElementById('reg-cedula').value.trim();
-  const name   = document.getElementById('reg-name').value.trim();
-  const box    = document.getElementById('cred-preview');
+  const cedula = document.getElementById('r-cedula').value.trim();
+  const name   = document.getElementById('r-name').value.trim();
+  const box    = document.getElementById('r-preview');
+
   if (cedula && name) {
-    document.getElementById('prev-user').textContent = cedula;
-    document.getElementById('prev-pass').textContent = buildPassword(cedula, name);
+    document.getElementById('r-prev-u').textContent = cedula;
+    document.getElementById('r-prev-p').textContent = buildPass(cedula, name);
     box.style.display = 'block';
   } else {
     box.style.display = 'none';
   }
 }
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 //  AUTH: REGISTRO
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 async function handleRegister() {
-  const cedula = document.getElementById('reg-cedula').value.trim();
-  const name   = document.getElementById('reg-name').value.trim();
-  const phone  = document.getElementById('reg-phone').value.trim();
+  if (isLoading) return;
 
-  if (!cedula || !name) return showToast('error', 'Campos requeridos', 'Ingresa cédula y nombre completo');
-  if (cedula.length < 8) return showToast('error', 'Cédula inválida', 'Debe tener al menos 8 dígitos');
+  const cedula = document.getElementById('r-cedula').value.trim();
+  const name   = document.getElementById('r-name').value.trim();
+  const phone  = document.getElementById('r-phone').value.trim();
 
-  const email    = `${cedula}@aurabank.ec`;
-  const password = buildPassword(cedula, name);
+  // Validaciones
+  if (!cedula) return toast('error', 'Cédula requerida', 'Ingresa tu número de cédula');
+  if (cedula.length < 8) return toast('error', 'Cédula inválida', 'Debe tener mínimo 8 dígitos');
+  if (!/^\d+$/.test(cedula)) return toast('error', 'Cédula inválida', 'Solo se permiten números');
+  if (!name) return toast('error', 'Nombre requerido', 'Ingresa tu nombre completo');
+  if (name.trim().split(' ').length < 2) return toast('warning', 'Nombre incompleto', 'Ingresa al menos nombre y apellido');
 
-  await showProcessing('Creando cuenta...', [
-    'Generando identidad en Auth...',
-    'Registrando perfil en base de datos...',
-    'Configurando saldo inicial...'
-  ], 2200);
+  const email    = `${cedula}@aurabank.local`;
+  const password = buildPass(cedula, name);
 
-  const { data: authData, error: authErr } = await supabase.auth.signUp({ email, password });
-  if (authErr) return showToast('error', 'Error de Auth', authErr.message);
-  if (!authData.user) return showToast('error', 'Error', 'No se pudo crear el usuario');
+  isLoading = true;
+  document.getElementById('btn-register').disabled = true;
 
-  const { error: profErr } = await supabase.from('profiles').insert([{
-    id:        authData.user.id,
-    cedula,
-    full_name: name,
-    phone:     phone || null,
-    balance:   100.00
-  }]);
+  await showProc('Creando tu cuenta...', [
+    'Generando identidad segura...',
+    'Registrando en base de datos...',
+    'Configurando saldo inicial $100...'
+  ], 2500);
 
-  if (profErr) {
-    // Si el perfil ya existe (cédula duplicada)
-    if (profErr.code === '23505') return showToast('error', 'Cédula ya registrada', 'Esta cédula ya tiene una cuenta');
-    return showToast('error', 'Error al crear perfil', profErr.message);
+  try {
+    // 1. Crear usuario en Auth
+    const { data: authData, error: authErr } = await sb.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { cedula, full_name: name }
+      }
+    });
+
+    if (authErr) {
+      if (authErr.message.toLowerCase().includes('already registered')) {
+        toast('error', 'Cédula ya registrada', 'Esta cédula ya tiene una cuenta. Usa "Ingresar".');
+      } else {
+        toast('error', 'Error de registro', authErr.message);
+      }
+      return;
+    }
+
+    if (!authData.user) {
+      toast('error', 'Error', 'No se pudo crear el usuario. Intenta de nuevo.');
+      return;
+    }
+
+    // Verificar si necesita confirmar email
+    if (!authData.session) {
+      toast('warning', 'Confirma tu email',
+        'Revisa tu correo y confirma la cuenta, o desactiva "Email confirmations" en Supabase → Auth → Settings.');
+      goTo('login');
+      return;
+    }
+
+    // 2. Crear perfil (el trigger no existe, lo hacemos manual)
+    const { error: profErr } = await sb.from('profiles').insert({
+      id:        authData.user.id,
+      cedula:    cedula,
+      full_name: name.trim(),
+      phone:     phone || null,
+      balance:   100.00
+    });
+
+    if (profErr) {
+      if (profErr.code === '23505') {
+        // Cédula duplicada → intentar cargar perfil existente
+        toast('warning', 'Cédula ya existente', 'Cargando tu cuenta existente...');
+        await loadProfile(authData.user.id);
+        return;
+      }
+      toast('error', 'Error al crear perfil', profErr.message);
+      return;
+    }
+
+    // Éxito
+    toast('success', '¡Cuenta creada!', `Usuario: ${cedula} · Clave: ${password}`);
+
+    // Limpiar campos
+    ['r-cedula','r-name','r-phone'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('r-preview').style.display = 'none';
+
+    await loadProfile(authData.user.id);
+
+  } catch(e) {
+    console.error('Register error:', e);
+    toast('error', 'Error inesperado', e.message || 'Intenta de nuevo');
+  } finally {
+    isLoading = false;
+    document.getElementById('btn-register').disabled = false;
   }
-
-  showToast('success', '¡Cuenta creada!', `Tu clave: ${password}`);
-  // Limpiar campos
-  ['reg-cedula','reg-name','reg-phone'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('cred-preview').style.display = 'none';
-  await loadUserProfile(authData.user.id);
 }
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 //  AUTH: LOGIN
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 async function handleLogin() {
-  const cedula = document.getElementById('login-user').value.trim();
-  const pass   = document.getElementById('login-pass').value.trim();
+  if (isLoading) return;
 
-  if (!cedula || !pass) return showToast('error', 'Campos vacíos', 'Ingresa tu cédula y contraseña');
+  const cedula = document.getElementById('l-user').value.trim();
+  const pass   = document.getElementById('l-pass').value;
 
-  await showProcessing('Conectando a Supabase...', [
+  if (!cedula) return toast('error', 'Campo vacío', 'Ingresa tu cédula');
+  if (!pass)   return toast('error', 'Campo vacío', 'Ingresa tu contraseña');
+
+  const email = `${cedula}@aurabank.local`;
+
+  isLoading = true;
+  document.getElementById('btn-login').disabled = true;
+
+  await showProc('Iniciando sesión...', [
     'Verificando credenciales...',
-    'Descargando perfil...'
+    'Descargando tu perfil...'
   ], 1800);
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email:    `${cedula}@aurabank.ec`,
-    password: pass
-  });
+  try {
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
 
-  if (error) return showToast('error', 'Acceso denegado', 'Cédula o contraseña incorrecta');
-  await loadUserProfile(data.user.id);
+    if (error) {
+      const errLow = error.message.toLowerCase();
+      if (errLow.includes('invalid') || errLow.includes('credentials')) {
+        toast('error', 'Acceso denegado', 'Cédula o contraseña incorrecta.');
+      } else if (errLow.includes('email not confirmed')) {
+        toast('error', 'Email sin confirmar',
+          'Confirma tu correo o desactiva la confirmación en Supabase → Auth → Settings.');
+      } else {
+        toast('error', 'Error de acceso', error.message);
+      }
+      return;
+    }
+
+    await loadProfile(data.user.id);
+
+  } catch(e) {
+    console.error('Login error:', e);
+    toast('error', 'Error inesperado', e.message || 'Intenta de nuevo');
+  } finally {
+    isLoading = false;
+    document.getElementById('btn-login').disabled = false;
+  }
 }
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 //  AUTH: LOGOUT
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 async function handleLogout() {
-  if (realtimeChannel) { supabase.removeChannel(realtimeChannel); realtimeChannel = null; }
-  await supabase.auth.signOut();
-  CURRENT_USER = null;
-  ['login-user','login-pass'].forEach(id => document.getElementById(id).value = '');
+  if (rtChannel) { sb.removeChannel(rtChannel); rtChannel = null; }
+  await sb.auth.signOut();
+  ME = null;
+  ['l-user','l-pass'].forEach(id => { document.getElementById(id).value = ''; });
   goTo('welcome');
-  showToast('info', 'Sesión cerrada', 'Hasta pronto');
+  toast('info', 'Sesión cerrada', 'Hasta pronto 👋');
 }
 
-// ═══════════════════════════════════════════════════════════
-//  CARGAR PERFIL Y DASHBOARD
-// ═══════════════════════════════════════════════════════════
-async function loadUserProfile(userId) {
-  const { data: profile, error } = await supabase
-    .from('profiles').select('*').eq('id', userId).single();
+// ═══════════════════════════════════════════════════════════════
+//  CARGAR PERFIL
+// ═══════════════════════════════════════════════════════════════
+async function loadProfile(userId) {
+  const { data: profile, error } = await sb
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single();
 
   if (error || !profile) {
-    showToast('error', 'Error crítico', 'No se encontró tu perfil en la base de datos');
-    return handleLogout();
+    console.error('loadProfile error:', error);
+    // Si el perfil no existe (raro), dejamos al usuario en welcome
+    toast('error', 'Perfil no encontrado', 'Crea una cuenta nueva o contacta soporte.');
+    goTo('welcome');
+    return;
   }
 
-  CURRENT_USER = profile;
-  updateDashboardUI();
+  ME = profile;
+  renderDashboard();
   goTo('dashboard');
-  await fetchTransactions();
+  await fetchTx(false);
   setupRealtime();
 }
 
-function updateDashboardUI() {
-  if (!CURRENT_USER) return;
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Buenos días' : hour < 18 ? 'Buenas tardes' : 'Buenas noches';
-  document.getElementById('dash-greeting').textContent = `${greeting}, ${CURRENT_USER.full_name?.split(' ')[0]} 👋`;
-  document.getElementById('dash-cedula').textContent   = `Cédula: ${CURRENT_USER.cedula}`;
-  document.getElementById('dash-balance').textContent  = parseFloat(CURRENT_USER.balance).toFixed(2);
+// ═══════════════════════════════════════════════════════════════
+//  DASHBOARD UI
+// ═══════════════════════════════════════════════════════════════
+function renderDashboard() {
+  if (!ME) return;
+  const h = new Date().getHours();
+  const greet = h < 12 ? 'Buenos días' : h < 18 ? 'Buenas tardes' : 'Buenas noches';
+  const firstName = ME.full_name?.split(' ')[0] || 'Usuario';
+
+  document.getElementById('d-greeting').textContent = `${greet}, ${firstName} 👋`;
+  document.getElementById('d-cedula').textContent   = `Cédula ·  ${ME.cedula}`;
+  document.getElementById('d-balance').textContent  = fmtMoney(ME.balance);
 }
 
 function showProfile() {
-  if (!CURRENT_USER) return;
-  showToast('info', CURRENT_USER.full_name, `Cédula: ${CURRENT_USER.cedula} · Saldo: $${parseFloat(CURRENT_USER.balance).toFixed(2)}`);
+  if (!ME) return;
+  toast('info', ME.full_name,
+    `Cédula: ${ME.cedula} · Saldo: $${fmtMoney(ME.balance)}`);
 }
 
-// ═══════════════════════════════════════════════════════════
-//  REALTIME (Supabase Channels)
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  REALTIME
+// ═══════════════════════════════════════════════════════════════
 function setupRealtime() {
-  if (realtimeChannel) { supabase.removeChannel(realtimeChannel); }
+  if (rtChannel) { sb.removeChannel(rtChannel); }
 
-  realtimeChannel = supabase.channel('aurabank-realtime')
+  rtChannel = sb.channel(`user-${ME.id}`)
     .on('postgres_changes', {
       event: 'UPDATE', schema: 'public', table: 'profiles',
-      filter: `id=eq.${CURRENT_USER.id}`
-    }, (payload) => {
-      const oldBal = parseFloat(CURRENT_USER.balance);
+      filter: `id=eq.${ME.id}`
+    }, payload => {
+      const oldBal = parseFloat(ME.balance);
       const newBal = parseFloat(payload.new.balance);
-      CURRENT_USER.balance = newBal;
-      document.getElementById('dash-balance').textContent = newBal.toFixed(2);
+      ME.balance = newBal;
 
-      // Efecto visual
-      const el = document.getElementById('dash-balance-wrap');
-      el.classList.add('updated');
-      setTimeout(() => el.classList.remove('updated'), 1500);
+      const el = document.getElementById('d-balance');
+      const wrap = document.getElementById('d-balance-el');
+      el.textContent = fmtMoney(newBal);
 
-      if (newBal > oldBal) showToast('success', '💰 Dinero recibido', `+$${(newBal - oldBal).toFixed(2)} acreditados`);
+      const cls = newBal > oldBal ? 'flash-up' : 'flash-down';
+      wrap.classList.add(cls);
+      setTimeout(() => wrap.classList.remove(cls), 1600);
+
+      const diff = Math.abs(newBal - oldBal).toFixed(2);
+      if (newBal > oldBal) {
+        toast('success', '💰 Dinero recibido', `+$${diff} acreditados en tu cuenta`);
+      }
     })
     .on('postgres_changes', {
       event: 'INSERT', schema: 'public', table: 'transactions'
     }, () => {
-      fetchTransactions();
+      fetchTx(false);
     })
-    .subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        console.log('✅ Realtime activo');
-      }
+    .subscribe(status => {
+      console.log('Realtime status:', status);
     });
 }
 
-// ═══════════════════════════════════════════════════════════
-//  TRANSACCIONES: FETCH Y RENDER
-// ═══════════════════════════════════════════════════════════
-async function fetchTransactions() {
-  if (!CURRENT_USER) return;
+// ═══════════════════════════════════════════════════════════════
+//  TRANSACCIONES
+// ═══════════════════════════════════════════════════════════════
+async function fetchTx(showToastMsg = false) {
+  if (!ME) return;
+  const list = document.getElementById('d-tx-list');
 
-  const { data, error } = await supabase
-    .from('transactions')
-    .select('*')
-    .or(`sender_id.eq.${CURRENT_USER.id},receiver_cedula.eq.${CURRENT_USER.cedula}`)
-    .order('created_at', { ascending: false })
-    .limit(15);
-
-  if (error) { console.error('fetchTransactions error:', error); return; }
-
-  const list = document.getElementById('tx-list');
-  const countEl = document.getElementById('tx-count');
-
-  if (!data || data.length === 0) {
-    list.innerHTML = `<p style="color:#444;font-size:0.82rem;text-align:center;padding:30px 0;">Sin movimientos aún</p>`;
-    countEl.textContent = '';
-    return;
+  // Skeleton placeholder
+  if (showToastMsg) {
+    list.innerHTML = `<div style="padding:16px;">
+      <div class="skeleton" style="height:44px;margin-bottom:10px;"></div>
+      <div class="skeleton" style="height:44px;margin-bottom:10px;"></div>
+      <div class="skeleton" style="height:44px;"></div>
+    </div>`;
   }
 
-  countEl.textContent = `${data.length} movimiento${data.length !== 1 ? 's' : ''}`;
+  try {
+    const { data, error } = await sb
+      .from('transactions')
+      .select('*')
+      .or(`sender_id.eq.${ME.id},receiver_id.eq.${ME.id}`)
+      .order('created_at', { ascending: false })
+      .limit(20);
 
-  list.innerHTML = data.map(tx => {
-    const isSender     = tx.sender_id === CURRENT_USER.id;
-    const isWithdrawal = tx.type === 'withdrawal';
-    const isOut        = isSender;
-    const color        = isOut ? '#ef4444' : '#22c55e';
-    const sign         = isOut ? '-' : '+';
-    const iconBg       = isOut ? '#1a0505' : '#051a0a';
-    const iconColor    = isOut ? '#ef4444' : '#22c55e';
+    if (error) throw error;
 
-    let icon  = isWithdrawal ? 'material-symbols:account-balance' : (isOut ? 'material-symbols:send' : 'material-symbols:download');
-    let title = isWithdrawal
-      ? `Retiro a ${tx.bank_name || 'Banco'}`
-      : (isOut ? `→ Cédula ${tx.receiver_cedula}` : `← Recibido`);
+    const countEl = document.getElementById('d-tx-count');
 
-    return `
-      <div class="tx-item">
-        <div class="tx-icon" style="background:${iconBg};">
-          <iconify-icon icon="${icon}" style="color:${iconColor};font-size:1.1rem;"></iconify-icon>
-        </div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:0.85rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
-          <div style="font-size:0.7rem;color:#444;">${formatDate(tx.created_at)} · <span style="color:#333;">${tx.status}</span></div>
-        </div>
-        <div style="font-family:'Sora';font-weight:700;color:${color};flex-shrink:0;">${sign}$${parseFloat(tx.amount).toFixed(2)}</div>
-      </div>`;
-  }).join('');
+    if (!data || data.length === 0) {
+      list.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">💳</div>
+          <div>Sin movimientos aún</div>
+          <div style="color:var(--text-3);margin-top:4px;font-size:0.72rem;">Tus transacciones aparecerán aquí</div>
+        </div>`;
+      countEl.textContent = '';
+      return;
+    }
+
+    countEl.textContent = `${data.length} movimiento${data.length !== 1 ? 's' : ''}`;
+
+    list.innerHTML = data.map(tx => {
+      const isOut  = tx.sender_id === ME.id;
+      const isWdw  = tx.type === 'withdrawal';
+
+      const color   = isOut ? 'var(--red)'  : 'var(--green)';
+      const iconBg  = isOut ? 'var(--red-bg)' : 'var(--green-bg)';
+      const iconCol = isOut ? 'var(--red)'  : 'var(--green)';
+      const sign    = isOut ? '−' : '+';
+      const icon    = isWdw
+        ? 'material-symbols:account-balance'
+        : isOut
+          ? 'material-symbols:arrow-upward'
+          : 'material-symbols:arrow-downward';
+
+      let title = isWdw
+        ? `Retiro a ${tx.bank_name || 'banco exterior'}`
+        : isOut
+          ? `Enviado · cédula ${tx.receiver_cedula || '—'}`
+          : `Recibido`;
+
+      return `
+        <div class="tx-item">
+          <div class="tx-icon" style="background:${iconBg};">
+            <iconify-icon icon="${icon}" style="color:${iconCol};font-size:1rem;"></iconify-icon>
+          </div>
+          <div class="tx-meta">
+            <div class="tx-title">${title}</div>
+            <div class="tx-date">${fmtDate(tx.created_at)} · <span style="color:var(--text-3);">${tx.status}</span></div>
+          </div>
+          <div class="tx-amount" style="color:${color};">
+            ${sign}$${fmtMoney(tx.amount)}
+          </div>
+        </div>`;
+    }).join('');
+
+    if (showToastMsg) toast('success', 'Actualizado', `${data.length} movimiento${data.length!==1?'s':''} cargados`);
+
+  } catch(e) {
+    console.error('fetchTx error:', e);
+    list.innerHTML = `<div class="empty-state">
+      <div>Error al cargar movimientos</div>
+      <div style="font-size:0.72rem;color:var(--text-3);margin-top:4px;">${e.message}</div>
+    </div>`;
+  }
 }
 
-// ═══════════════════════════════════════════════════════════
-//  TRANSFERENCIA INTERNA (usa RPC make_transfer)
-// ═══════════════════════════════════════════════════════════
-function updateTransferPreview() {
-  const cedulaDest = document.getElementById('t-cedula').value.trim();
+// ═══════════════════════════════════════════════════════════════
+//  TRANSFERENCIA
+// ═══════════════════════════════════════════════════════════════
+function updateTxPreview() {
+  const destCedula = document.getElementById('t-cedula').value.trim();
   const amount     = parseFloat(document.getElementById('t-amount').value) || 0;
-  const preview    = document.getElementById('transfer-preview');
+  const preview    = document.getElementById('t-preview');
 
-  if (cedulaDest && amount > 0) {
+  if (destCedula && amount > 0) {
     preview.style.display = 'block';
-    document.getElementById('prev-amount').textContent = amount.toFixed(2);
-    document.getElementById('prev-dest').textContent   = cedulaDest;
-    const after = (parseFloat(CURRENT_USER?.balance || 0) - amount);
-    document.getElementById('prev-after').textContent  = `$${after.toFixed(2)}`;
-    document.getElementById('prev-after').style.color  = after < 0 ? '#ef4444' : '#aaa';
+    document.getElementById('t-prev-amt').textContent  = fmtMoney(amount);
+    document.getElementById('t-prev-dest').textContent = destCedula;
+    const rest = (parseFloat(ME?.balance || 0) - amount);
+    const restEl = document.getElementById('t-prev-rest');
+    restEl.textContent = `$${fmtMoney(rest)}`;
+    restEl.style.color = rest < 0 ? 'var(--red)' : '#aaa';
   } else {
     preview.style.display = 'none';
   }
 }
 
 async function processTransfer() {
-  const targetCedula = document.getElementById('t-cedula').value.trim();
-  const amount       = parseFloat(document.getElementById('t-amount').value);
+  if (isLoading) return;
 
-  if (!targetCedula)          return showToast('error', 'Campo vacío', 'Ingresa la cédula del destinatario');
-  if (isNaN(amount) || amount <= 0) return showToast('error', 'Monto inválido', 'Ingresa un monto mayor a 0');
-  if (amount < 0.01)          return showToast('error', 'Monto muy bajo', 'Mínimo $0.01');
-  if (targetCedula === CURRENT_USER.cedula) return showToast('error', 'Operación inválida', 'No puedes enviarte dinero a ti mismo');
-  if (parseFloat(CURRENT_USER.balance) < amount) return showToast('error', 'Saldo insuficiente', `Tu saldo es $${parseFloat(CURRENT_USER.balance).toFixed(2)}`);
+  const destCedula = document.getElementById('t-cedula').value.trim();
+  const amount     = parseFloat(document.getElementById('t-amount').value);
 
-  await showProcessing('Ejecutando transferencia...', [
-    'Verificando cuenta destino...',
-    'Validando saldo disponible...',
-    'Ejecutando transacción atómica en DB...',
-    'Confirmando operación...'
-  ], 3000);
-
-  // Llamada a la función RPC segura de PostgreSQL
-  const { error } = await supabase.rpc('make_transfer', {
-    p_sender_id:      CURRENT_USER.id,
-    p_receiver_cedula: targetCedula,
-    p_amount:          amount
-  });
-
-  if (error) {
-    const msg = error.message.includes('no existe')
-      ? 'La cédula ingresada no está registrada en AuraBank'
-      : error.message.includes('insuficiente')
-      ? 'Saldo insuficiente para esta operación'
-      : error.message;
-    return showToast('error', 'Transferencia rechazada', msg);
+  // Validaciones del lado cliente
+  if (!destCedula)                return toast('error', 'Destinatario requerido', 'Ingresa la cédula del destinatario');
+  if (!/^\d+$/.test(destCedula)) return toast('error', 'Cédula inválida', 'La cédula solo debe contener números');
+  if (isNaN(amount) || amount <= 0) return toast('error', 'Monto inválido', 'Ingresa un monto mayor a $0');
+  if (amount < 0.01)              return toast('error', 'Monto muy bajo', 'El mínimo es $0.01');
+  if (destCedula === ME.cedula)   return toast('error', 'Operación inválida', 'No puedes enviarte dinero a ti mismo');
+  if (parseFloat(ME.balance) < amount) {
+    return toast('error', 'Saldo insuficiente', `Tu saldo es $${fmtMoney(ME.balance)}`);
   }
 
-  // Actualizar saldo local optimistamente
-  CURRENT_USER.balance = parseFloat(CURRENT_USER.balance) - amount;
-  document.getElementById('dash-balance').textContent = CURRENT_USER.balance.toFixed(2);
-  document.getElementById('t-balance').textContent    = CURRENT_USER.balance.toFixed(2);
+  isLoading = true;
 
-  // Preparar comprobante
-  lastReceiptData = {
-    amount:  `$${amount.toFixed(2)}`,
-    dest:    `Cédula: ${targetCedula}`,
-    date:    formatDate(new Date().toISOString()),
-    id:      `TX-${Date.now().toString(36).toUpperCase()}`
-  };
-  document.getElementById('receipt-amount').textContent = lastReceiptData.amount;
-  document.getElementById('receipt-dest').textContent   = lastReceiptData.dest;
-  document.getElementById('receipt-date').textContent   = lastReceiptData.date;
-  document.getElementById('receipt-id').textContent     = lastReceiptData.id;
+  await showProc('Procesando transferencia...', [
+    'Verificando cuenta destino...',
+    'Validando saldo disponible...',
+    'Ejecutando transacción atómica...',
+    'Confirmando operación...'
+  ], 3200);
 
-  // Limpiar y mostrar éxito
-  document.getElementById('t-amount').value  = '';
-  document.getElementById('t-cedula').value  = '';
-  document.getElementById('transfer-preview').style.display = 'none';
-  goTo('success');
-  fetchTransactions();
+  try {
+    const { data: rpcData, error: rpcErr } = await sb.rpc('make_transfer', {
+      p_sender_id:       ME.id,
+      p_receiver_cedula: destCedula,
+      p_amount:          amount
+    });
+
+    if (rpcErr) {
+      // Parsear mensajes de error de la función SQL
+      const msg = rpcErr.message || '';
+      if (msg.includes('destinatario_no_existe') || msg.includes('no registrada')) {
+        toast('error', 'Destinatario no encontrado', `La cédula ${destCedula} no está registrada en AuraBank`);
+      } else if (msg.includes('saldo_insuficiente') || msg.includes('nsuficiente')) {
+        toast('error', 'Saldo insuficiente', 'No tienes fondos suficientes para esta operación');
+      } else if (msg.includes('auto_envio')) {
+        toast('error', 'Operación inválida', 'No puedes enviarte dinero a ti mismo');
+      } else if (msg.includes('make_transfer') && msg.includes('exist')) {
+        // RPC no existe en Supabase
+        toast('error', 'RPC no configurado',
+          'Ejecuta el SQL de configuración en tu Supabase (ver comentario al inicio del HTML)');
+      } else {
+        toast('error', 'Transferencia rechazada', msg);
+      }
+      return;
+    }
+
+    // Actualización optimista local
+    const newBal = parseFloat(ME.balance) - amount;
+    ME.balance = newBal;
+    document.getElementById('d-balance').textContent = fmtMoney(newBal);
+    document.getElementById('t-bal').textContent     = fmtMoney(newBal);
+
+    // Comprobante
+    const txId = rpcData?.tx_id || `TX-${Date.now().toString(36).toUpperCase()}`;
+    const destName = rpcData?.receiver_name || `Cédula ${destCedula}`;
+
+    document.getElementById('rc-amount').textContent = `$${fmtMoney(amount)}`;
+    document.getElementById('rc-id').textContent     = txId;
+    document.getElementById('rc-dest').textContent   = destName;
+    document.getElementById('rc-date').textContent   = fmtDate(new Date().toISOString());
+
+    // Limpiar formulario
+    document.getElementById('t-amount').value = '';
+    document.getElementById('t-cedula').value = '';
+    document.getElementById('t-preview').style.display = 'none';
+
+    goTo('success');
+    fetchTx(false);
+
+  } catch(e) {
+    console.error('Transfer error:', e);
+    toast('error', 'Error inesperado', e.message || 'Intenta de nuevo');
+  } finally {
+    isLoading = false;
+  }
 }
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 //  RETIRO INTERNACIONAL
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 function updateBanks() {
   const country = document.getElementById('w-country')?.value || 'USA';
-  const select  = document.getElementById('w-bank');
-  if (!select) return;
-  select.innerHTML = (bankDB[country] || [])
+  const sel     = document.getElementById('w-bank');
+  if (!sel) return;
+  sel.innerHTML = (BANKS[country] || [])
     .map(b => `<option value="${b}">${b}</option>`).join('');
 }
 
-function calcWithdrawFee() {
+function calcFee() {
   const amount = parseFloat(document.getElementById('w-amount').value) || 0;
-  const total  = amount > 0 ? amount + 2.50 : 0;
-  document.getElementById('w-total').textContent = `$${total.toFixed(2)}`;
+  document.getElementById('w-total').textContent = amount > 0 ? `$${fmtMoney(amount + 2.50)}` : '$0.00';
 }
 
 async function processWithdrawal() {
-  const amount    = parseFloat(document.getElementById('w-amount').value);
-  const bank      = document.getElementById('w-bank').value;
-  const account   = document.getElementById('w-account').value.trim();
-  const totalCost = amount + 2.50;
+  if (isLoading) return;
 
-  if (isNaN(amount) || amount <= 0)    return showToast('error', 'Monto inválido', 'Ingresa un monto válido');
-  if (!account)                         return showToast('error', 'Cuenta requerida', 'Ingresa el número de cuenta o IBAN');
-  if (parseFloat(CURRENT_USER.balance) < totalCost)
-    return showToast('error', 'Saldo insuficiente', `Necesitas $${totalCost.toFixed(2)} (incluye comisión $2.50)`);
+  const amount  = parseFloat(document.getElementById('w-amount').value);
+  const bank    = document.getElementById('w-bank').value;
+  const account = document.getElementById('w-account').value.trim();
+  const total   = amount + 2.50;
 
-  await showProcessing('Conectando Red SWIFT...', [
+  if (isNaN(amount) || amount <= 0) return toast('error', 'Monto inválido', 'Ingresa un monto válido');
+  if (amount < 5)                   return toast('error', 'Monto mínimo', 'El mínimo de retiro es $5.00');
+  if (!account)                     return toast('error', 'Cuenta requerida', 'Ingresa el número de cuenta o IBAN');
+  if (parseFloat(ME.balance) < total) {
+    return toast('error', 'Saldo insuficiente',
+      `Necesitas $${fmtMoney(total)} (monto + comisión $2.50). Tu saldo: $${fmtMoney(ME.balance)}`);
+  }
+
+  isLoading = true;
+
+  await showProc(`Conectando con ${bank}...`, [
     'Verificando fondos disponibles...',
-    `Estableciendo túnel seguro con ${bank}...`,
+    `Estableciendo túnel SWIFT con ${bank}...`,
     'Validando código SWIFT/BIC...',
     'Procesando débito en cuenta...',
-    'Registrando en historial...'
-  ], 4500);
+    'Registrando operación...'
+  ], 4800);
 
-  // 1. Descontar saldo (UPDATE directo porque no hay receptor interno)
-  const newBalance = parseFloat(CURRENT_USER.balance) - totalCost;
-  const { error: updateErr } = await supabase
-    .from('profiles')
-    .update({ balance: newBalance })
-    .eq('id', CURRENT_USER.id);
+  try {
+    const newBal = parseFloat(ME.balance) - total;
 
-  if (updateErr) return showToast('error', 'Error al debitar', updateErr.message);
+    // Actualizar saldo
+    const { error: updErr } = await sb
+      .from('profiles')
+      .update({ balance: newBal })
+      .eq('id', ME.id);
 
-  // 2. Registrar retiro en transactions
-  const { error: txErr } = await supabase.from('transactions').insert([{
-    sender_id:  CURRENT_USER.id,
-    amount:     amount,
-    type:       'withdrawal',
-    bank_name:  bank,
-    status:     'Procesando (48h)'
-  }]);
+    if (updErr) {
+      toast('error', 'Error al debitar', updErr.message);
+      return;
+    }
 
-  if (txErr) console.warn('Error guardando tx retiro:', txErr.message);
+    // Registrar transacción
+    const { error: txErr } = await sb.from('transactions').insert({
+      sender_id:    ME.id,
+      amount:       amount,
+      type:         'withdrawal',
+      bank_name:    bank,
+      account_dest: account,
+      status:       'Procesando (24-48h)'
+    });
 
-  // Actualizar estado local
-  CURRENT_USER.balance = newBalance;
-  document.getElementById('dash-balance').textContent = newBalance.toFixed(2);
+    if (txErr) console.warn('Tx withdraw insert error:', txErr.message);
 
-  showToast('success', 'Retiro iniciado', `$${amount.toFixed(2)} llegarán a ${bank} en ~48 hrs`);
-  document.getElementById('w-amount').value  = '';
-  document.getElementById('w-account').value = '';
-  document.getElementById('w-total').textContent = '$0.00';
-  goTo('dashboard');
-  fetchTransactions();
+    // Actualizar estado local
+    ME.balance = newBal;
+    document.getElementById('d-balance').textContent = fmtMoney(newBal);
+
+    toast('success', 'Retiro iniciado',
+      `$${fmtMoney(amount)} en camino a ${bank}. Tiempo estimado: 24-48 h`);
+
+    // Limpiar
+    document.getElementById('w-amount').value  = '';
+    document.getElementById('w-account').value = '';
+    document.getElementById('w-total').textContent = '$0.00';
+
+    goTo('dashboard');
+    fetchTx(false);
+
+  } catch(e) {
+    console.error('Withdrawal error:', e);
+    toast('error', 'Error inesperado', e.message || 'Intenta de nuevo');
+  } finally {
+    isLoading = false;
+  }
 }
 </script>
 </body>
