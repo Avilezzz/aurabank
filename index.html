@@ -1,1 +1,522 @@
-CAIDO
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <!--
+    ╔══════════════════════════════════════════════════════════════════╗
+    ║         AURABANK v3 — INTEGRACIÓN SUPABASE REAL                 ║
+    ║  ✅ Auth real conectada a Supabase                              ║
+    ║  ✅ Actualización de saldos en Tiempo Real                      ║
+    ║  ✅ Nueva función de Retiros Internacionales                    ║
+    ╚══════════════════════════════════════════════════════════════════╝
+  -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#000000" />
+  <title>AuraBank · Banca Real</title>
+
+  <!-- Tailwind CSS & Fonts -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
+
+  <!-- 🚀 SUPABASE SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            gold: { DEFAULT: '#facc15', dark: '#eab308', light: '#fde68a' },
+            ink:  { DEFAULT: '#0a0a0a', card: '#111', border: '#1f1f1f' }
+          },
+          fontFamily: { display: ['Sora', 'sans-serif'], body: ['DM Sans', 'sans-serif'] }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Estilos base reutilizados del original (minificados para organización) */
+    *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin:0; padding:0; background:#000; font-family:'DM Sans',sans-serif; color:#fff; height:100%; overflow-x:hidden; }
+    #app-shell { width:100%; max-width:430px; min-height:100vh; margin:0 auto; background:#0a0a0a; position:relative; overflow:hidden; }
+    .screen { display:none; min-height:100vh; flex-direction:column; }
+    .screen.active { display:flex; animation:fade-in 0.3s ease; }
+    
+    /* Splash, Overlay, Cards... */
+    #screen-splash { background:#000; align-items:center; justify-content:center; flex-direction:column; gap:20px; }
+    .splash-logo { font-family:'Sora',sans-serif; font-size:2.5rem; font-weight:800; color:#facc15; }
+    .spinner { width:40px; height:40px; border:3px solid #1f1f1f; border-top-color:#facc15; border-radius:50%; animation:spin 0.9s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    @keyframes fade-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+    #processing-overlay { display:none; position:fixed; inset:0; z-index:999; background:rgba(0,0,0,0.92); backdrop-filter:blur(8px); flex-direction:column; align-items:center; justify-content:center; gap:16px; }
+    #processing-overlay.active { display:flex; }
+    .proc-spinner { width:56px; height:56px; border:4px solid #1f1f1f; border-top-color:#facc15; border-radius:50%; animation:spin 0.8s linear infinite; }
+    .proc-steps { display:flex; flex-direction:column; gap:8px; min-width:220px; }
+    .proc-step { display:flex; align-items:center; gap:10px; font-size:0.85rem; color:#555; transition:color 0.4s; }
+    .proc-step.active { color:#fff; }
+    .proc-step.done { color:#facc15; }
+
+    /* Login & Forms */
+    .login-card { background:#111; border-radius:28px 28px 0 0; padding:32px 24px 44px; border-top:1px solid #1f1f1f; }
+    .input-field { width:100%; background:#1a1a1a; border:1.5px solid #2a2a2a; border-radius:14px; padding:14px 48px 14px 16px; color:#fff; font-family:'DM Sans',sans-serif; font-size:1rem; outline:none; transition:0.2s; }
+    .input-field:focus { border-color:#facc15; }
+    .input-wrapper { position:relative; margin-bottom: 12px; }
+    .input-icon { position:absolute; right:14px; top:50%; transform:translateY(-50%); color:#444; }
+    .input-label { display:block; color:#777; font-size:0.78rem; font-weight:600; text-transform:uppercase; margin-bottom:6px; }
+    
+    .btn-primary { width:100%; background:#facc15; color:#000; font-family:'Sora',sans-serif; font-weight:700; font-size:1rem; padding:16px; border-radius:14px; border:none; cursor:pointer; min-height:54px; display:flex; align-items:center; justify-content:center; gap:8px; }
+    .btn-primary:active { transform:scale(0.97); }
+    .btn-ghost { background:transparent; border:none; color:#666; font-size:1.2rem; cursor:pointer; }
+    .btn-secondary { background:transparent; border:1.5px solid #2a2a2a; color:#aaa; font-family:'DM Sans',sans-serif; font-size:0.9rem; padding:12px 20px; border-radius:12px; cursor:pointer; width:100%; }
+
+    /* Dashboard */
+    .dash-header { display:flex; align-items:center; justify-content:space-between; padding:20px 20px 0; }
+    .balance-card { margin:20px 16px 0; background:linear-gradient(135deg,#1a1a0a 0%,#111 60%,#0a0a00 100%); border:1px solid #2a2a0a; border-radius:22px; padding:24px 20px; }
+    .balance-amount { font-family:'Sora',sans-serif; font-weight:800; font-size:2.6rem; color:#fff; line-height:1; }
+    .action-tile { background:#111; border:1px solid #1f1f1f; border-radius:16px; padding:14px 8px; display:flex; flex-direction:column; align-items:center; gap:8px; cursor:pointer; }
+    
+    /* Toasts & Modals */
+    #toast-container { position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:9999; width:calc(100% - 32px); max-width:398px; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
+    .toast { background:#1a1a1a; border-radius:16px; padding:14px 16px; display:flex; align-items:flex-start; gap:12px; transform:translateY(-20px); opacity:0; transition:0.3s; border-left:3px solid #333; }
+    .toast.show { transform:translateY(0); opacity:1; }
+    .tx-item { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid #1a1a1a; }
+  </style>
+</head>
+<body>
+
+<div id="app-shell">
+  <div id="toast-container"></div>
+
+  <!-- OVERLAY PROCESAMIENTO -->
+  <div id="processing-overlay">
+    <div class="proc-spinner"></div>
+    <p id="proc-title" style="font-family:'Sora',sans-serif;font-weight:700;font-size:1rem;color:#fff;">Procesando...</p>
+    <div class="proc-steps" id="proc-steps"></div>
+  </div>
+
+  <!-- SPLASH -->
+  <div id="screen-splash" class="screen active">
+    <div class="splash-logo">AuraBank</div>
+    <div class="splash-sub">Conectando Servidor...</div>
+    <div class="spinner"></div>
+  </div>
+
+  <!-- LOGIN -->
+  <div id="screen-login" class="screen" style="justify-content:flex-end;">
+    <div class="login-card">
+      <div style="text-align:center; margin-bottom:20px;">
+        <h1 style="font-family:'Sora'; font-size:1.8rem; color:#facc15; font-weight:800;">AuraBank</h1>
+        <p style="color:#666; font-size:0.8rem;">Banca respaldada por Supabase</p>
+      </div>
+      <div class="form-group">
+        <label class="input-label">Cédula / DNI</label>
+        <div class="input-wrapper">
+          <input id="login-user" type="text" class="input-field" placeholder="Tu número de cédula" />
+        </div>
+        <label class="input-label">Contraseña</label>
+        <div class="input-wrapper">
+          <input id="login-pass" type="password" class="input-field" placeholder="Cédula + inicial de nombre" />
+        </div>
+        <button class="btn-primary" onclick="handleLogin()" style="margin-top:10px;">Ingresar</button>
+        <div style="text-align:center; margin-top:16px; font-size:0.85rem; color:#888;">
+          ¿No tienes cuenta? <span onclick="goTo('register')" style="color:#facc15; cursor:pointer;">Regístrate aquí</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- REGISTER -->
+  <div id="screen-register" class="screen" style="justify-content:flex-end;">
+    <div class="login-card">
+      <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
+        <h2 style="font-family:'Sora'; font-weight:700;">Crear Cuenta Real</h2>
+        <button class="btn-ghost" onclick="goTo('login')">✕</button>
+      </div>
+      <div class="input-wrapper"><input id="reg-cedula" type="text" class="input-field" placeholder="Cédula (Ej: 0921345678)" /></div>
+      <div class="input-wrapper"><input id="reg-name" type="text" class="input-field" placeholder="Nombre Completo" /></div>
+      <div class="input-wrapper"><input id="reg-phone" type="text" class="input-field" placeholder="Teléfono" /></div>
+      <button class="btn-primary" onclick="handleRegister()">Crear Perfil en Base de Datos</button>
+    </div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div id="screen-dashboard" class="screen" style="overflow-y:auto; padding-bottom:80px;">
+    <div class="dash-header">
+      <div>
+        <div style="font-family:'Sora'; font-weight:800; font-size:1.3rem; color:#facc15;">AuraBank</div>
+        <div style="font-size:0.75rem; color:#555;" id="dash-greeting">Cargando...</div>
+      </div>
+      <button class="btn-ghost" onclick="handleLogout()"><iconify-icon icon="material-symbols:logout"></iconify-icon></button>
+    </div>
+
+    <div class="balance-card">
+      <div style="color:#888; font-size:0.75rem; text-transform:uppercase;">Saldo Disponible Real</div>
+      <div class="balance-amount">$<span id="dash-balance">0.00</span></div>
+      <div style="color:#facc15; font-size:0.8rem; margin-top:8px;" id="dash-cedula"></div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:20px 16px;">
+      <div class="action-tile" onclick="goTo('transfer')">
+        <iconify-icon icon="material-symbols:send-money" style="color:#facc15; font-size:1.8rem;"></iconify-icon>
+        <span style="font-size:0.75rem; color:#888;">Transferir</span>
+      </div>
+      <!-- NUEVO BOTÓN: RETIRAR -->
+      <div class="action-tile" onclick="goTo('withdraw')">
+        <iconify-icon icon="material-symbols:account-balance" style="color:#3b82f6; font-size:1.8rem;"></iconify-icon>
+        <span style="font-size:0.75rem; color:#888;">Retiro Extranjero</span>
+      </div>
+    </div>
+
+    <div style="padding:0 16px;">
+      <div style="font-family:'Sora'; font-size:0.9rem; color:#888; margin-bottom:10px;">Movimientos (Tiempo Real)</div>
+      <div id="tx-list"></div>
+    </div>
+  </div>
+
+  <!-- TRANSFERENCIA LOCAL -->
+  <div id="screen-transfer" class="screen" style="padding:20px 16px;">
+    <button class="btn-ghost" onclick="goTo('dashboard')" style="text-align:left; margin-bottom:10px;">← Volver</button>
+    <h2 style="font-family:'Sora'; font-size:1.2rem; margin-bottom:20px;">Transferencia a Usuario Aura</h2>
+    
+    <div class="input-wrapper">
+      <label class="input-label">Cédula Destino</label>
+      <input id="t-cedula" type="text" class="input-field" placeholder="Cédula del usuario en DB" />
+    </div>
+    <div class="input-wrapper">
+      <label class="input-label">Monto a Enviar ($)</label>
+      <input id="t-amount" type="number" class="input-field" placeholder="0.00" />
+    </div>
+    
+    <button class="btn-primary" onclick="processTransfer()" style="margin-top:20px;">Confirmar Transferencia Atómica</button>
+  </div>
+
+  <!-- NUEVO: RETIRO INTERNACIONAL -->
+  <div id="screen-withdraw" class="screen" style="padding:20px 16px;">
+    <button class="btn-ghost" onclick="goTo('dashboard')" style="text-align:left; margin-bottom:10px;">← Volver</button>
+    <h2 style="font-family:'Sora'; font-size:1.2rem; margin-bottom:5px;">Retiro Internacional Swift</h2>
+    <p style="color:#666; font-size:0.8rem; margin-bottom:20px;">Envía tus fondos a bancos de otros países.</p>
+    
+    <div class="input-wrapper">
+      <label class="input-label">País de Destino</label>
+      <select id="w-country" class="input-field" onchange="updateBanks()">
+        <option value="USA">🇺🇸 Estados Unidos</option>
+        <option value="España">🇪🇸 España</option>
+        <option value="México">🇲🇽 México</option>
+        <option value="Colombia">🇨🇴 Colombia</option>
+        <option value="Argentina">🇦🇷 Argentina</option>
+      </select>
+    </div>
+
+    <div class="input-wrapper">
+      <label class="input-label">Banco Receptor</label>
+      <select id="w-bank" class="input-field"></select>
+    </div>
+
+    <div class="input-wrapper">
+      <label class="input-label">Número de Cuenta / IBAN</label>
+      <input type="text" class="input-field" placeholder="Ingresa la cuenta destino" />
+    </div>
+
+    <div class="input-wrapper">
+      <label class="input-label">Monto a Retirar ($)</label>
+      <input id="w-amount" type="number" class="input-field" placeholder="0.00" oninput="calcWithdrawFee()" />
+    </div>
+
+    <div style="background:#1a1a00; border:1px solid #2a2a10; border-radius:12px; padding:12px; margin-bottom:20px;">
+      <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:#888;">
+        <span>Comisión Red SWIFT:</span> <span style="color:#ef4444;">$2.50</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:0.9rem; font-weight:bold; margin-top:5px;">
+        <span>Total a debitar:</span> <span id="w-total" style="color:#facc15;">$0.00</span>
+      </div>
+    </div>
+    
+    <button class="btn-primary" onclick="processWithdrawal()">Procesar Retiro</button>
+  </div>
+
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// 🚀 SUPABASE SETUP Y ESTADO GLOBAL
+// ═══════════════════════════════════════════════════════════
+const SUPABASE_URL = 'https://vndmfizzyjlmwqcejrli.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_TYzeg1Pajv7EF20rSfxqQg_iA2arQV2';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let CURRENT_USER = null; // Guardará id, profile, etc.
+let realtimeSubscription = null;
+
+// Datos de Bancos para simulación
+const bankDB = {
+  "USA": ["JP Morgan Chase", "Wells Fargo", "Bank of America"],
+  "España": ["BBVA España", "Banco Santander", "CaixaBank"],
+  "México": ["Banorte", "Citibanamex", "BBVA México"],
+  "Colombia": ["Bancolombia", "Davivienda", "Banco de Bogotá"],
+  "Argentina": ["Banco Galicia", "Banco Nación", "Santander Río"]
+};
+
+// ── NAVEGACIÓN Y UTILIDADES ──
+function goTo(screen) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + screen).classList.add('active');
+  if(screen === 'withdraw') updateBanks();
+}
+
+function showToast(type, title, msg) {
+  const container = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  const colors = { success:'#22c55e', error:'#ef4444', info:'#3b82f6' };
+  t.className = 'toast';
+  t.style.borderLeftColor = colors[type] || '#fff';
+  t.innerHTML = `<div style="flex:1"><div style="font-weight:700;font-size:0.85rem">${title}</div><div style="font-size:0.75rem;color:#888">${msg}</div></div>`;
+  container.appendChild(t);
+  setTimeout(() => t.classList.add('show'), 10);
+  setTimeout(() => { t.classList.remove('show'); setTimeout(()=>t.remove(), 300); }, 3000);
+}
+
+function showProcessing(title, steps, duration) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('processing-overlay');
+    document.getElementById('proc-title').textContent = title;
+    const stepsDiv = document.getElementById('proc-steps');
+    stepsDiv.innerHTML = steps.map((s,i)=>`<div class="proc-step" id="step-${i}">• ${s}</div>`).join('');
+    overlay.classList.add('active');
+    
+    let i = 0;
+    const interval = setInterval(() => {
+      if(i > 0) document.getElementById(`step-${i-1}`).classList.replace('active','done');
+      if(i < steps.length) { document.getElementById(`step-${i}`).classList.add('active'); i++; } 
+      else {
+        clearInterval(interval);
+        setTimeout(() => { overlay.classList.remove('active'); resolve(); }, 500);
+      }
+    }, duration / steps.length);
+  });
+}
+
+// ── INIT & SESIÓN ──
+window.onload = async () => {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) {
+    await loadUserProfile(session.user.id);
+  } else {
+    goTo('login');
+  }
+};
+
+// ── AUTENTICACIÓN (LOGIN / REGISTRO) ──
+function getPasswordGen(cedula, name) {
+  return cedula + (name.charAt(0).toUpperCase() || 'A');
+}
+
+async function handleRegister() {
+  const cedula = document.getElementById('reg-cedula').value.trim();
+  const name = document.getElementById('reg-name').value.trim();
+  const phone = document.getElementById('reg-phone').value.trim();
+
+  if(!cedula || !name) return showToast('error', 'Error', 'Llena todos los campos');
+
+  const email = `${cedula}@aurabank.com`; // Usamos cédula como email interno
+  const password = getPasswordGen(cedula, name);
+
+  await showProcessing('Creando en DB...', ['Generando Auth...', 'Creando Perfil...'], 1500);
+
+  const { data: authData, error: authErr } = await supabase.auth.signUp({ email, password });
+  if (authErr) return showToast('error', 'Error DB', authErr.message);
+
+  // Insertar en tabla profiles
+  const { error: profErr } = await supabase.from('profiles').insert([{
+    id: authData.user.id,
+    cedula,
+    full_name: name,
+    phone,
+    balance: 100.00
+  }]);
+
+  if (profErr) return showToast('error', 'Error Perfil', profErr.message);
+
+  showToast('success', 'Cuenta Creada', `Clave generada: ${password}`);
+  await loadUserProfile(authData.user.id);
+}
+
+async function handleLogin() {
+  const cedula = document.getElementById('login-user').value.trim();
+  const pass = document.getElementById('login-pass').value.trim();
+  
+  if(!cedula || !pass) return showToast('error', 'Error', 'Ingresa credenciales');
+
+  await showProcessing('Conectando a Supabase...', ['Validando token...', 'Descargando datos...'], 1500);
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: `${cedula}@aurabank.com`,
+    password: pass
+  });
+
+  if (error) return showToast('error', 'Error Login', 'Cédula o clave incorrecta');
+  await loadUserProfile(data.user.id);
+}
+
+async function handleLogout() {
+  await supabase.auth.signOut();
+  CURRENT_USER = null;
+  if(realtimeSubscription) supabase.removeChannel(realtimeSubscription);
+  goTo('login');
+}
+
+// ── CARGA DE DATOS Y TIEMPO REAL ──
+async function loadUserProfile(userId) {
+  const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+  
+  if (error || !profile) {
+    showToast('error', 'Error Crítico', 'No se encontró el perfil en DB');
+    return handleLogout();
+  }
+
+  CURRENT_USER = profile;
+  
+  // Actualizar UI
+  document.getElementById('dash-greeting').textContent = `Hola, ${profile.full_name}`;
+  document.getElementById('dash-cedula').textContent = `Cédula: ${profile.cedula}`;
+  document.getElementById('dash-balance').textContent = parseFloat(profile.balance).toFixed(2);
+  
+  goTo('dashboard');
+  fetchTransactions();
+  setupRealtime(); // Escuchar cambios en la DB
+}
+
+function setupRealtime() {
+  if (realtimeSubscription) supabase.removeChannel(realtimeSubscription);
+
+  realtimeSubscription = supabase.channel('schema-db-changes')
+    // Escuchar si el saldo cambia (ej: alguien nos envió dinero)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${CURRENT_USER.id}` }, (payload) => {
+      CURRENT_USER.balance = payload.new.balance;
+      document.getElementById('dash-balance').textContent = parseFloat(CURRENT_USER.balance).toFixed(2);
+      showToast('success', '¡Actualización DB!', 'Tu saldo ha cambiado');
+    })
+    // Escuchar si hay nuevas transacciones
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'transactions' }, () => {
+      fetchTransactions(); // Recargar lista
+    })
+    .subscribe();
+}
+
+// ── TRANSACCIONES Y RETIROS ──
+async function fetchTransactions() {
+  const { data, error } = await supabase.from('transactions')
+    .select('*')
+    .or(`sender_id.eq.${CURRENT_USER.id},receiver_cedula.eq.${CURRENT_USER.cedula}`)
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  if (error) return;
+
+  const list = document.getElementById('tx-list');
+  if (data.length === 0) return list.innerHTML = `<p style="color:#666;font-size:0.8rem;">Sin transacciones en DB.</p>`;
+
+  list.innerHTML = data.map(tx => {
+    const isOut = tx.sender_id === CURRENT_USER.id;
+    const isWithdrawal = tx.type === 'withdrawal';
+    const color = isOut ? '#ef4444' : '#22c55e';
+    const sign = isOut ? '-' : '+';
+    
+    let title = isWithdrawal ? `Retiro a ${tx.bank_name}` : (isOut ? `Transferencia a ${tx.receiver_cedula}` : `Recibido`);
+    
+    return `
+      <div class="tx-item">
+        <div style="flex:1">
+          <div style="font-size:0.85rem; font-weight:600;">${title}</div>
+          <div style="font-size:0.7rem; color:#666;">ID: ${tx.id.split('-')[0]}... | ${tx.status}</div>
+        </div>
+        <div style="font-family:'Sora'; font-weight:700; color:${color}">${sign}$${parseFloat(tx.amount).toFixed(2)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+// 1. Lógica Transferencia Interna
+async function processTransfer() {
+  const targetCedula = document.getElementById('t-cedula').value.trim();
+  const amount = parseFloat(document.getElementById('t-amount').value);
+
+  if (!targetCedula || isNaN(amount) || amount <= 0) return showToast('error', 'Aviso', 'Datos inválidos');
+  if (targetCedula === CURRENT_USER.cedula) return showToast('error', 'Aviso', 'No puedes enviarte a ti mismo');
+
+  await showProcessing('Ejecutando RPC...', ['Verificando saldos...', 'Contactando base de datos...', 'Completando transacción...'], 2500);
+
+  // Llamamos a la función segura SQL que creamos
+  const { error } = await supabase.rpc('make_transfer', {
+    p_sender_id: CURRENT_USER.id,
+    p_receiver_cedula: targetCedula,
+    p_amount: amount
+  });
+
+  if (error) {
+    showToast('error', 'Rechazado por DB', error.message);
+  } else {
+    showToast('success', 'Enviado', `Dinero transferido al usuario ${targetCedula}`);
+    document.getElementById('t-amount').value = '';
+    goTo('dashboard');
+  }
+}
+
+// 2. Lógica Retiro Internacional
+function updateBanks() {
+  const country = document.getElementById('w-country').value;
+  const banks = bankDB[country] || [];
+  const select = document.getElementById('w-bank');
+  select.innerHTML = banks.map(b => `<option value="${b}">${b}</option>`).join('');
+}
+
+function calcWithdrawFee() {
+  const amount = parseFloat(document.getElementById('w-amount').value) || 0;
+  const total = amount > 0 ? (amount + 2.50) : 0;
+  document.getElementById('w-total').textContent = `$${total.toFixed(2)}`;
+}
+
+async function processWithdrawal() {
+  const amount = parseFloat(document.getElementById('w-amount').value);
+  const totalCost = amount + 2.50; // Monto + Comisión Fija
+
+  if (isNaN(amount) || amount <= 0) return showToast('error', 'Aviso', 'Monto inválido');
+  if (CURRENT_USER.balance < totalCost) return showToast('error', 'Aviso', 'Saldo insuficiente (Incluye comisión)');
+
+  const bank = document.getElementById('w-bank').value;
+
+  await showProcessing('Conectando Red Internacional...', [
+    'Verificando fondos...', 
+    `Estableciendo túnel seguro con ${bank}...`, 
+    'Aprobando código SWIFT...',
+    'Transacción registrada en Blockchain'
+  ], 4000);
+
+  // En un entorno real, aquí usaríamos otra función RPC. Para simplicidad, haremos 2 queries.
+  // 1. Restamos el saldo
+  const { error: updateErr } = await supabase
+    .from('profiles')
+    .update({ balance: CURRENT_USER.balance - totalCost })
+    .eq('id', CURRENT_USER.id);
+
+  if (updateErr) return showToast('error', 'Fallo DB', updateErr.message);
+
+  // 2. Registramos el retiro en el historial
+  await supabase.from('transactions').insert([{
+    sender_id: CURRENT_USER.id,
+    amount: amount,
+    type: 'withdrawal',
+    bank_name: bank,
+    status: 'Procesando (48h)'
+  }]);
+
+  showToast('success', 'Retiro Iniciado', `El dinero llegará a ${bank} en ~48 hrs.`);
+  document.getElementById('w-amount').value = '';
+  goTo('dashboard');
+}
+</script>
+</body>
+</html>
