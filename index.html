@@ -1,70 +1,1149 @@
 <!DOCTYPE html>
 <html lang="es">
+<!--
+╔══════════════════════════════════════════════════════════════════════╗
+║              AURABANK — SQL PARA SUPABASE                           ║
+║  Ejecutar en: Supabase Dashboard → SQL Editor                       ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+
+
+
+-->
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Estado del Servicio - Banca Web</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AURABANK — Banca Digital</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg:      '#0B0E11',
+            surf:    '#1E2329',
+            elev:    '#252D36',
+            nav:     '#181A20',
+            brd:     '#2B3139',
+            gold:    '#F0B90B',
+            glt:     '#F8D12F',
+            gdk:     '#D4910A',
+            tx:      '#EAECEF',
+            muted:   '#848E9C',
+            ok:      '#03A66D',
+            err:     '#CF304A',
+          },
+          fontFamily: {
+            chakra: ['Chakra Petch', 'sans-serif'],
+            mono:   ['DM Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body { background: #0B0E11; font-family: 'Chakra Petch', sans-serif; color: #EAECEF; min-height: 100vh; overflow-x: hidden; }
 
-    <!-- Tailwind CSS correcto -->
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: #1E2329; }
+    ::-webkit-scrollbar-thumb { background: #2B3139; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #F0B90B55; }
+
+    /* ── Loader ── */
+    #loader {
+      position: fixed; inset: 0; z-index: 9999;
+      background: #0B0E11;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px;
+      transition: opacity 0.5s ease, visibility 0.5s ease;
+    }
+    #loader.out { opacity: 0; visibility: hidden; pointer-events: none; }
+    .loader-logo { font-size: 32px; font-weight: 700; letter-spacing: 6px; animation: logoPulse 2s ease-in-out infinite; }
+    .loader-logo span.g { background: linear-gradient(135deg,#F0B90B,#D4910A); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+    .loader-logo span.w { color: #EAECEF; }
+    @keyframes logoPulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+    .ring {
+      width: 48px; height: 48px;
+      border: 3px solid #2B3139; border-top-color: #F0B90B;
+      border-radius: 50%;
+      animation: spin 0.85s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Toasts ── */
+    #toast-box {
+      position: fixed; top: 20px; right: 20px; z-index: 9998;
+      display: flex; flex-direction: column; gap: 10px;
+      width: min(360px, calc(100vw - 40px));
+      pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto;
+      padding: 14px 18px; border-radius: 12px;
+      font-size: 13px; letter-spacing: 0.2px; line-height: 1.5;
+      display: flex; align-items: flex-start; gap: 12px;
+      border-left: 3px solid;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+      animation: toastIn 0.35s cubic-bezier(.16,1,.3,1) forwards;
+    }
+    .toast.ok-t  { background: rgba(3,166,109,0.12);  color: #03A66D; border-color: #03A66D; }
+    .toast.err-t { background: rgba(207,48,74,0.12);  color: #CF304A; border-color: #CF304A; }
+    .toast.inf-t { background: rgba(240,185,11,0.12); color: #F0B90B; border-color: #F0B90B; }
+    .toast.out   { animation: toastOut 0.3s ease forwards; }
+    @keyframes toastIn  { from{opacity:0;transform:translateX(30px)} to{opacity:1;transform:translateX(0)} }
+    @keyframes toastOut { to{opacity:0;transform:translateX(30px)} }
+    .toast-icon { font-size: 16px; line-height: 1; flex-shrink: 0; margin-top: 1px; }
+
+    /* ── Card ── */
+    .card { background: #1E2329; border: 1px solid #2B3139; border-radius: 16px; transition: border-color 0.2s; }
+    .card:hover { border-color: #3D4552; }
+
+    /* ── Gold text gradient ── */
+    .gtext { background: linear-gradient(135deg,#F0B90B 0%,#F8D12F 45%,#D4910A 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+
+    /* ── Input ── */
+    .inp {
+      width: 100%; background: #0B0E11; border: 1px solid #2B3139;
+      border-radius: 10px; padding: 12px 16px;
+      color: #EAECEF; font-family: 'Chakra Petch', sans-serif; font-size: 14px;
+      outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .inp:focus { border-color: #F0B90B; box-shadow: 0 0 0 3px rgba(240,185,11,0.1); }
+    .inp::placeholder { color: #848E9C; }
+    .inp-label { font-size: 11px; color: #848E9C; text-transform: uppercase; letter-spacing: 0.6px; font-weight: 500; margin-bottom: 6px; display: block; }
+
+    /* ── Buttons ── */
+    .btn-g {
+      display: block; width: 100%; padding: 13px 24px;
+      background: linear-gradient(135deg, #F0B90B, #D4910A);
+      color: #0B0E11; font-family: 'Chakra Petch', sans-serif;
+      font-weight: 700; font-size: 14px; letter-spacing: 0.8px;
+      border: none; border-radius: 10px; cursor: pointer;
+      transition: all 0.2s; position: relative; overflow: hidden;
+    }
+    .btn-g::after { content:''; position:absolute; inset:0; background:rgba(255,255,255,0); transition:background 0.2s; }
+    .btn-g:hover::after { background:rgba(255,255,255,0.08); }
+    .btn-g:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(240,185,11,0.28); }
+    .btn-g:active { transform: translateY(0); }
+    .btn-g:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+    .btn-o {
+      padding: 11px 18px; background: transparent;
+      border: 1px solid #F0B90B; color: #F0B90B;
+      font-family: 'Chakra Petch', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;
+      border-radius: 10px; cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    }
+    .btn-o:hover { background: rgba(240,185,11,0.1); }
+    .btn-o:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Nav ── */
+    .nav-item {
+      display: flex; align-items: center; gap: 12px; padding: 11px 14px;
+      border-radius: 10px; cursor: pointer; color: #848E9C;
+      font-size: 13px; font-weight: 500; letter-spacing: 0.3px;
+      transition: all 0.2s; border: 1px solid transparent;
+      text-decoration: none;
+    }
+    .nav-item:hover { background: #2B3139; color: #EAECEF; }
+    .nav-item.act  { background: rgba(240,185,11,0.08); color: #F0B90B; border-color: rgba(240,185,11,0.15); }
+
+    /* ── Balance card ── */
+    .bal-card {
+      background: linear-gradient(135deg, #1E2329 0%, #252D36 60%, #1E2329 100%);
+      border: 1px solid rgba(240,185,11,0.18);
+      border-radius: 20px; position: relative; overflow: hidden;
+    }
+    .bal-card::before {
+      content:''; position:absolute; top:-60%; left:-30%; width:160%; height:200%;
+      background: radial-gradient(ellipse at 25% 60%, rgba(240,185,11,0.07) 0%, transparent 65%);
+      pointer-events: none;
+    }
+    .bal-card::after {
+      content:''; position:absolute; top:0; left:0; right:0; height:1px;
+      background: linear-gradient(90deg, transparent, rgba(240,185,11,0.4), transparent);
+    }
+
+    /* ── Stat cards ── */
+    .stat { background:#1E2329; border:1px solid #2B3139; border-radius:14px; padding:20px; transition:all 0.2s; }
+    .stat:hover { border-color:rgba(240,185,11,0.25); transform:translateY(-2px); box-shadow:0 8px 24px rgba(0,0,0,0.3); }
+
+    /* ── Transaction row ── */
+    .tx-row { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid #2B3139; transition:background 0.15s; }
+    .tx-row:last-child { border-bottom:none; }
+    .tx-row:hover { background:rgba(255,255,255,0.02); }
+
+    /* ── Views ── */
+    .view { display:none; }
+    .view.act { display:block; animation: viewIn 0.35s cubic-bezier(.16,1,.3,1); }
+    @keyframes viewIn { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+
+    /* ── Modal ── */
+    .modal-bg {
+      position:fixed; inset:0; z-index:9990;
+      background:rgba(0,0,0,0.75); backdrop-filter:blur(8px);
+      display:flex; align-items:center; justify-content:center; padding:20px;
+      animation:fadeIn 0.2s ease;
+    }
+    .modal-bg.hide { display:none; }
+    @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+
+    /* ── Receipt ── */
+    .receipt {
+      background: #FAFAFA; color:#1a1a1a; border-radius:18px; padding:36px 32px;
+      max-width:390px; width:100%; position:relative; overflow:hidden;
+      animation: recIn 0.4s cubic-bezier(.16,1,.3,1);
+    }
+    @keyframes recIn { from{opacity:0;transform:scale(0.92) translateY(12px)} to{opacity:1;transform:scale(1) translateY(0)} }
+    .receipt-bar { position:absolute; top:0; left:0; right:0; height:5px; background:linear-gradient(90deg,#F0B90B,#D4910A,#F0B90B); }
+    .rec-row { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:8px 0; }
+    .rec-divider { border:none; border-top:1px dashed #ddd; margin:8px 0; }
+    .rec-label { font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.6px; }
+    .rec-val { font-family:'DM Mono',monospace; font-size:13px; font-weight:500; color:#1a1a1a; text-align:right; }
+    .rec-val.big { font-size:26px; font-weight:700; color:#D4910A; }
+
+    /* ── Auth bg ── */
+    .auth-bg {
+      min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;
+      background: radial-gradient(ellipse at 15% 85%, rgba(240,185,11,0.09) 0%, transparent 50%),
+                  radial-gradient(ellipse at 85% 15%, rgba(240,185,11,0.06) 0%, transparent 50%),
+                  #0B0E11;
+    }
+
+    /* ── Auth tab ── */
+    .auth-tab { flex:1; padding:10px; border-radius:9px; border:none; cursor:pointer; font-family:'Chakra Petch',sans-serif; font-size:13px; font-weight:600; letter-spacing:0.5px; transition:all 0.25s; }
+    .auth-tab.act { background:linear-gradient(135deg,#F0B90B,#D4910A); color:#0B0E11; }
+    .auth-tab.off { background:transparent; color:#848E9C; }
+
+    /* ── Bottom nav ── */
+    .bnav-item { display:flex; flex-direction:column; align-items:center; gap:4px; flex:1; padding:10px 0; cursor:pointer; color:#848E9C; font-size:10px; font-weight:500; transition:color 0.2s; }
+    .bnav-item.act { color:#F0B90B; }
+
+    /* ── Verified badge ── */
+    .verified-box { background:rgba(3,166,109,0.08); border:1px solid rgba(3,166,109,0.25); border-radius:10px; padding:14px 16px; }
+
+    /* ── Avatar ── */
+    .avatar { width:38px; height:38px; border-radius:50%; background:linear-gradient(135deg,#F0B90B,#D4910A); display:flex; align-items:center; justify-content:center; font-weight:700; color:#0B0E11; font-size:15px; flex-shrink:0; }
+
+    /* ── Mobile ── */
+    @media (max-width:768px) {
+      #sidebar { display:none !important; }
+      #main    { margin-left:0 !important; padding:16px !important; padding-bottom:80px !important; }
+      #bnav    { display:flex !important; }
+    }
+    @media (min-width:769px) {
+      #bnav    { display:none !important; }
+    }
+
+    /* ── Number mono ── */
+    .mono { font-family:'DM Mono',monospace; }
+
+    /* ── Ripple animation for new balance ── */
+    @keyframes balanceUpdate { 0%{color:#F0B90B} 30%{color:#F8D12F;text-shadow:0 0 20px rgba(240,185,11,0.6)} 100%{color:#F0B90B} }
+    .balance-flash { animation: balanceUpdate 1s ease; }
+
+    /* ── Notification dot ── */
+    .notif-dot { width:8px; height:8px; background:#F0B90B; border-radius:50%; animation:notifPulse 2s ease-in-out infinite; }
+    @keyframes notifPulse { 0%,100%{box-shadow:0 0 0 0 rgba(240,185,11,0.4)} 50%{box-shadow:0 0 0 6px rgba(240,185,11,0)} }
+
+    /* ── Empty state ── */
+    .empty { padding:48px 20px; text-align:center; color:#848E9C; font-size:13px; }
+  </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body>
 
-    <!-- MODAL ESTÁTICO SIEMPRE VISIBLE -->
-    <div id="modalOverlay" class="fixed inset-0 z-50">
-        
-        <!-- Fondo oscuro -->
-        <div class="absolute inset-0 bg-gray-900/80 backdrop-blur-sm"></div>
+<!-- ════════════════════════════════════════
+     LOADER
+════════════════════════════════════════ -->
+<div id="loader">
+  <div class="loader-logo"><span class="g">AURA</span><span class="w">BANK</span></div>
+  <div class="ring"></div>
+  <div style="font-size:11px;color:#848E9C;letter-spacing:2px;">CARGANDO SISTEMA SEGURO</div>
+</div>
 
-        <!-- Contenedor -->
-        <div class="relative flex min-h-screen items-center justify-center p-4">
-            
-            <div class="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
-                
-                <!-- Barra superior -->
-                <div class="h-2 bg-red-600"></div>
+<!-- ════════════════════════════════════════
+     TOASTS
+════════════════════════════════════════ -->
+<div id="toast-box"></div>
 
-                <div class="p-8">
-                    <!-- Icono -->
-                    <div class="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-red-100 animate-pulse">
-                        <svg class="h-12 w-12 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                            />
-                        </svg>
-                    </div>
+<!-- ════════════════════════════════════════
+     RECEIPT MODAL
+════════════════════════════════════════ -->
+<div id="rec-modal" class="modal-bg hide">
+  <div class="receipt">
+    <div class="receipt-bar"></div>
 
-                    <!-- Texto -->
-                    <div class="text-center">
-                        <h1 class="mb-3 text-3xl font-black uppercase tracking-tight text-gray-900">
-                            Banca Web Caída
-                        </h1>
-                        <p class="text-lg leading-relaxed text-gray-500">
-                            Estamos realizando un mantenimiento de emergencia en nuestros servidores.
-                            <span class="mt-2 block font-bold text-red-600 underline">
-                                Vuelve a intentarlo mañana.
-                            </span>
-                        </p>
-                    </div>
-
-                    <!-- Botón estático -->
-                    <div class="mt-8">
-                        <button class="w-full rounded-2xl bg-gray-900 py-4 text-lg font-bold text-white shadow-lg transition hover:bg-gray-800 active:scale-95">
-                            ENTENDIDO
-                        </button>
-                    </div>
-
-                    <!-- Footer -->
-                    <p class="mt-4 text-center text-xs text-gray-400">
-                        Código de error: 503 SERVICE_UNAVAILABLE
-                    </p>
-                </div>
-            </div>
-        </div>
+    <div style="text-align:center;margin-bottom:24px;">
+      <div style="font-family:'Chakra Petch',sans-serif;font-weight:700;font-size:22px;letter-spacing:4px;color:#0B0E11;">
+        AURA<span style="color:#D4910A">BANK</span>
+      </div>
+      <div style="font-size:11px;color:#aaa;margin-top:4px;font-family:'DM Mono',monospace;letter-spacing:1px;">COMPROBANTE DE TRANSFERENCIA</div>
     </div>
 
+    <div style="display:flex;flex-direction:column;">
+      <div class="rec-row"><span class="rec-label">Código</span><span id="r-cod" class="rec-val mono"></span></div>
+      <hr class="rec-divider"/>
+      <div class="rec-row"><span class="rec-label">Fecha y hora</span><span id="r-fecha" class="rec-val"></span></div>
+      <div class="rec-row"><span class="rec-label">Emisor</span><span id="r-emisor" class="rec-val" style="font-family:'Chakra Petch',sans-serif;font-weight:600;"></span></div>
+      <div class="rec-row"><span class="rec-label">Receptor</span><span id="r-receptor" class="rec-val" style="font-family:'Chakra Petch',sans-serif;font-weight:600;"></span></div>
+      <div class="rec-row"><span class="rec-label">Cuenta destino</span><span id="r-cuenta" class="rec-val mono"></span></div>
+      <hr class="rec-divider"/>
+      <div class="rec-row" style="padding:12px 0;">
+        <span style="font-size:13px;font-weight:700;color:#333;font-family:'Chakra Petch',sans-serif;">MONTO TRANSFERIDO</span>
+        <span id="r-monto" class="rec-val big"></span>
+      </div>
+    </div>
+
+    <div style="margin-top:20px;padding-top:16px;border-top:1px dashed #ddd;text-align:center;font-size:11px;color:#aaa;font-family:'DM Mono',monospace;">
+      TRANSFERENCIA COMPLETADA ✓<br/>
+      <span style="font-size:10px;">Este comprobante es constancia oficial de pago</span>
+    </div>
+
+    <button class="btn-g" style="margin-top:22px;" onclick="closeReceipt()">CERRAR</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════
+     AUTH SECTION
+════════════════════════════════════════ -->
+<div id="auth-sec" class="auth-bg" style="display:none;">
+  <div style="width:100%;max-width:420px;">
+
+    <!-- Logo -->
+    <div style="text-align:center;margin-bottom:36px;">
+      <div style="font-size:40px;font-weight:700;letter-spacing:6px;line-height:1;">
+        <span class="gtext">AURA</span><span style="color:#EAECEF;">BANK</span>
+      </div>
+      <div style="color:#848E9C;font-size:12px;margin-top:8px;letter-spacing:2px;">BANCA DIGITAL · SEGURA · MODERNA</div>
+    </div>
+
+    <!-- Tabs -->
+    <div style="display:flex;background:#1E2329;border-radius:12px;padding:4px;margin-bottom:24px;border:1px solid #2B3139;gap:4px;">
+      <button id="tab-in"  class="auth-tab act" onclick="switchTab('in')">INICIAR SESIÓN</button>
+      <button id="tab-reg" class="auth-tab off" onclick="switchTab('reg')">REGISTRARSE</button>
+    </div>
+
+    <!-- Login -->
+    <div id="form-in" class="card" style="padding:28px;">
+      <div style="margin-bottom:24px;">
+        <div style="font-size:18px;font-weight:700;">Bienvenido de vuelta</div>
+        <div style="color:#848E9C;font-size:13px;margin-top:5px;">Accede a tu cuenta AURABANK</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div><label class="inp-label">Correo electrónico</label><input id="l-email" class="inp" type="email" placeholder="correo@ejemplo.com"/></div>
+        <div><label class="inp-label">Contraseña</label><input id="l-pass" class="inp" type="password" placeholder="••••••••"/></div>
+        <button id="btn-in" class="btn-g" style="margin-top:6px;letter-spacing:1px;" onclick="doLogin()">INGRESAR</button>
+      </div>
+    </div>
+
+    <!-- Register -->
+    <div id="form-reg" class="card" style="padding:28px;display:none;">
+      <div style="margin-bottom:24px;">
+        <div style="font-size:18px;font-weight:700;">Crear cuenta nueva</div>
+        <div style="color:#848E9C;font-size:13px;margin-top:5px;">Únete y recibe un <span style="color:#F0B90B;font-weight:600;">bono de $50.00</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div><label class="inp-label">Nombres completos</label><input id="r-nom" class="inp" type="text" placeholder="Ej: JUAN CARLOS PÉREZ"/></div>
+        <div><label class="inp-label">Correo electrónico</label><input id="r-mail" class="inp" type="email" placeholder="correo@ejemplo.com"/></div>
+        <div><label class="inp-label">Teléfono</label><input id="r-tel" class="inp" type="tel" placeholder="+593 99 999 9999"/></div>
+        <div><label class="inp-label">Contraseña</label><input id="r-pass" class="inp" type="password" placeholder="Mínimo 6 caracteres"/></div>
+        <button id="btn-reg" class="btn-g" style="margin-top:6px;letter-spacing:1px;" onclick="doRegister()">CREAR CUENTA</button>
+        <div style="text-align:center;color:#848E9C;font-size:11px;">
+          Al registrarte aceptas los términos y condiciones de AURABANK
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════
+     APP SECTION
+════════════════════════════════════════ -->
+<div id="app-sec" style="display:none;min-height:100vh;">
+  <div style="display:flex;min-height:100vh;">
+
+    <!-- ── Sidebar ── -->
+    <aside id="sidebar" style="width:248px;background:#181A20;border-right:1px solid #2B3139;padding:24px 14px;display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0;z-index:100;overflow-y:auto;">
+
+      <!-- Logo -->
+      <div style="padding:6px 12px 28px;">
+        <div style="font-size:24px;font-weight:700;letter-spacing:5px;"><span class="gtext">AURA</span><span style="color:#EAECEF;">BANK</span></div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+          <div class="notif-dot"></div>
+          <span style="font-size:10px;color:#848E9C;letter-spacing:1px;">SISTEMA EN LÍNEA</span>
+        </div>
+      </div>
+
+      <!-- User mini card -->
+      <div style="background:#1E2329;border:1px solid #2B3139;border-radius:12px;padding:14px;margin-bottom:24px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div id="sb-av" class="avatar">?</div>
+          <div style="min-width:0;flex:1;">
+            <div id="sb-name" style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
+            <div id="sb-acc"  style="font-size:11px;color:#848E9C;font-family:'DM Mono',monospace;margin-top:2px;letter-spacing:1px;">—</div>
+          </div>
+        </div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid #2B3139;display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:11px;color:#848E9C;text-transform:uppercase;letter-spacing:0.5px;">Saldo</span>
+          <span id="sb-bal" class="mono" style="font-size:16px;font-weight:700;color:#F0B90B;">$0.00</span>
+        </div>
+      </div>
+
+      <!-- Nav links -->
+      <nav style="flex:1;display:flex;flex-direction:column;gap:4px;">
+        <div class="nav-item act" id="sn-dash"    onclick="showView('dash')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+          Dashboard
+        </div>
+        <div class="nav-item"     id="sn-transfer" onclick="showView('transfer')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+          Transferencias
+        </div>
+        <div class="nav-item"     id="sn-reports"  onclick="showView('reports')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+          Reportes
+        </div>
+      </nav>
+
+      <div class="nav-item" onclick="doLogout()" style="color:#CF304A;margin-top:8px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        Cerrar sesión
+      </div>
+    </aside>
+
+    <!-- ── Main area ── -->
+    <main id="main" style="flex:1;margin-left:248px;padding:32px;overflow-y:auto;min-height:100vh;padding-bottom:40px;">
+
+      <!-- ─── DASHBOARD ─── -->
+      <div id="view-dash" class="view act">
+        <div style="margin-bottom:28px;">
+          <div style="font-size:12px;color:#848E9C;letter-spacing:1px;text-transform:uppercase;">Bienvenido de vuelta</div>
+          <div id="d-name" style="font-size:28px;font-weight:700;margin-top:4px;letter-spacing:-0.3px;">—</div>
+        </div>
+
+        <!-- Balance card -->
+        <div class="bal-card" style="padding:28px;margin-bottom:24px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;">
+            <div>
+              <div style="font-size:11px;color:#848E9C;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:10px;">Saldo disponible</div>
+              <div id="d-bal" class="mono" style="font-size:46px;font-weight:700;color:#F0B90B;line-height:1;transition:all 0.3s;">$0.00</div>
+              <div style="margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-size:11px;color:#848E9C;text-transform:uppercase;letter-spacing:0.5px;">N° CUENTA</span>
+                <span id="d-acc" class="mono" style="font-size:14px;font-weight:500;letter-spacing:2px;">—</span>
+                <button onclick="copyAcc()" title="Copiar" style="background:none;border:none;cursor:pointer;color:#848E9C;padding:2px;display:flex;align-items:center;" onmouseover="this.style.color='#F0B90B'" onmouseout="this.style.color='#848E9C'">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                </button>
+              </div>
+            </div>
+            <div style="width:64px;height:64px;border-radius:50%;background:rgba(240,185,11,0.1);border:2px solid rgba(240,185,11,0.25);display:flex;align-items:center;justify-content:center;">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="#F0B90B"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:24px;padding-top:22px;border-top:1px solid rgba(255,255,255,0.05);">
+            <button class="btn-g" style="font-size:13px;padding:11px;" onclick="showView('transfer')">↑ &nbsp;TRANSFERIR</button>
+            <button class="btn-o" style="font-size:13px;padding:11px;display:block;text-align:center;" onclick="showView('reports')">↓ &nbsp;HISTORIAL</button>
+          </div>
+        </div>
+
+        <!-- Quick stats -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px;">
+          <div class="stat">
+            <div style="font-size:11px;color:#848E9C;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Total Enviado</div>
+            <div id="d-sent" class="mono" style="font-size:22px;font-weight:700;color:#CF304A;">$0.00</div>
+          </div>
+          <div class="stat">
+            <div style="font-size:11px;color:#848E9C;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Total Recibido</div>
+            <div id="d-recv" class="mono" style="font-size:22px;font-weight:700;color:#03A66D;">$0.00</div>
+          </div>
+          <div class="stat">
+            <div style="font-size:11px;color:#848E9C;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Transferencias</div>
+            <div id="d-count" class="mono" style="font-size:22px;font-weight:700;color:#F0B90B;">0</div>
+          </div>
+        </div>
+
+        <!-- Recent transactions -->
+        <div class="card" style="overflow:hidden;padding:0;">
+          <div style="padding:18px 20px 14px;border-bottom:1px solid #2B3139;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:15px;font-weight:600;">Últimas transacciones</span>
+            <button onclick="showView('reports')" style="background:none;border:none;cursor:pointer;color:#848E9C;font-family:'Chakra Petch',sans-serif;font-size:12px;letter-spacing:0.3px;" onmouseover="this.style.color='#F0B90B'" onmouseout="this.style.color='#848E9C'">Ver todo →</button>
+          </div>
+          <div id="d-txs"><div class="empty">Cargando movimientos...</div></div>
+        </div>
+      </div>
+
+      <!-- ─── TRANSFER ─── -->
+      <div id="view-transfer" class="view">
+        <div style="margin-bottom:28px;">
+          <div style="font-size:26px;font-weight:700;letter-spacing:-0.3px;">Transferencias</div>
+          <div style="color:#848E9C;font-size:13px;margin-top:5px;">Envía dinero a otros usuarios registrados</div>
+        </div>
+
+        <div style="max-width:560px;">
+          <div class="card" style="padding:28px;">
+
+            <!-- Saldo mini -->
+            <div style="background:#0B0E11;border:1px solid #2B3139;border-radius:10px;padding:14px 18px;margin-bottom:26px;display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-size:12px;color:#848E9C;text-transform:uppercase;letter-spacing:0.5px;">Saldo disponible</span>
+              <span id="tr-bal" class="mono" style="font-size:20px;font-weight:700;color:#F0B90B;">$0.00</span>
+            </div>
+
+            <!-- Step 1 -->
+            <div style="margin-bottom:22px;">
+              <div style="font-size:11px;color:#F0B90B;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+                <span style="width:22px;height:22px;background:#F0B90B;color:#0B0E11;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">1</span>
+                CUENTA DESTINO
+              </div>
+              <div style="display:flex;gap:10px;">
+                <input id="tr-acc" class="inp" type="text" placeholder="Número de cuenta (10 dígitos)" maxlength="10" style="flex:1;font-family:'DM Mono',monospace;letter-spacing:2px;" oninput="this.value=this.value.replace(/\D/g,'')"/>
+                <button id="btn-val" class="btn-o" onclick="validateAcc()">VALIDAR</button>
+              </div>
+            </div>
+
+            <!-- Verified -->
+            <div id="verified-box" style="display:none;margin-bottom:22px;" class="verified-box">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <div style="width:40px;height:40px;border-radius:50%;background:rgba(3,166,109,0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#03A66D"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                </div>
+                <div>
+                  <div style="font-size:11px;color:#848E9C;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Destinatario verificado</div>
+                  <div id="verified-name" style="font-size:16px;font-weight:700;color:#03A66D;">—</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 2 -->
+            <div id="tr-step2" style="display:none;">
+              <div style="font-size:11px;color:#F0B90B;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+                <span style="width:22px;height:22px;background:#F0B90B;color:#0B0E11;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">2</span>
+                MONTO A ENVIAR
+              </div>
+              <div style="margin-bottom:20px;">
+                <label class="inp-label">Monto (USD)</label>
+                <div style="position:relative;">
+                  <span style="position:absolute;left:16px;top:50%;transform:translateY(-50%);color:#848E9C;font-size:18px;font-family:'DM Mono',monospace;pointer-events:none;">$</span>
+                  <input id="tr-amt" class="inp" type="number" step="0.01" min="0.01" placeholder="0.00" style="padding-left:32px;font-family:'DM Mono',monospace;font-size:20px;font-weight:500;"/>
+                </div>
+              </div>
+              <button id="btn-tr" class="btn-g" style="padding:15px;letter-spacing:1px;" onclick="doTransfer()">✓ &nbsp;CONFIRMAR TRANSFERENCIA</button>
+            </div>
+
+            <!-- Hint -->
+            <div id="tr-hint" style="text-align:center;padding:24px 0;color:#848E9C;font-size:13px;line-height:1.7;">
+              Ingresa el número de cuenta destino<br/>y presiona <span style="color:#F0B90B;">VALIDAR</span> para continuar
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── REPORTS ─── -->
+      <div id="view-reports" class="view">
+        <div style="margin-bottom:28px;">
+          <div style="font-size:26px;font-weight:700;letter-spacing:-0.3px;">Reportes</div>
+          <div style="color:#848E9C;font-size:13px;margin-top:5px;">Historial completo de movimientos</div>
+        </div>
+
+        <!-- Stats grid -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:26px;">
+          <div class="stat">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+              <div style="width:34px;height:34px;background:rgba(207,48,74,0.1);border-radius:8px;display:flex;align-items:center;justify-content:center;">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="#CF304A"><path d="M4 12l8-8 8 8H16v8H8v-8H4z"/></svg>
+              </div>
+              <span style="font-size:11px;color:#848E9C;text-transform:uppercase;letter-spacing:0.5px;">Total Enviado</span>
+            </div>
+            <div id="rp-sent" class="mono" style="font-size:26px;font-weight:700;color:#CF304A;">$0.00</div>
+          </div>
+          <div class="stat">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+              <div style="width:34px;height:34px;background:rgba(3,166,109,0.1);border-radius:8px;display:flex;align-items:center;justify-content:center;">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="#03A66D"><path d="M4 12l8 8 8-8h-4V4H8v8H4z"/></svg>
+              </div>
+              <span style="font-size:11px;color:#848E9C;text-transform:uppercase;letter-spacing:0.5px;">Total Recibido</span>
+            </div>
+            <div id="rp-recv" class="mono" style="font-size:26px;font-weight:700;color:#03A66D;">$0.00</div>
+          </div>
+          <div class="stat">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+              <div style="width:34px;height:34px;background:rgba(240,185,11,0.1);border-radius:8px;display:flex;align-items:center;justify-content:center;">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="#F0B90B"><path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2 2.29c-.63.63-.18 1.71.71 1.71H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" stroke="#F0B90B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+              </div>
+              <span style="font-size:11px;color:#848E9C;text-transform:uppercase;letter-spacing:0.5px;">Transferencias</span>
+            </div>
+            <div id="rp-cnt" class="mono" style="font-size:26px;font-weight:700;color:#F0B90B;">0</div>
+          </div>
+          <div class="stat">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+              <div style="width:34px;height:34px;background:rgba(240,185,11,0.1);border-radius:8px;display:flex;align-items:center;justify-content:center;">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="#F0B90B"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 14H11V8h2v8zm0-10H11V4h2v2z"/></svg>
+              </div>
+              <span style="font-size:11px;color:#848E9C;text-transform:uppercase;letter-spacing:0.5px;">Saldo Actual</span>
+            </div>
+            <div id="rp-bal" class="mono" style="font-size:26px;font-weight:700;color:#F0B90B;">$0.00</div>
+          </div>
+        </div>
+
+        <!-- Full list -->
+        <div class="card" style="overflow:hidden;padding:0;">
+          <div style="padding:18px 20px 14px;border-bottom:1px solid #2B3139;">
+            <span style="font-size:15px;font-weight:600;">Historial completo</span>
+          </div>
+          <div id="rp-txs"><div class="empty">Cargando historial...</div></div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Bottom nav (mobile) -->
+  <nav id="bnav" style="position:fixed;bottom:0;left:0;right:0;background:#181A20;border-top:1px solid #2B3139;display:none;z-index:100;">
+    <div style="display:flex;">
+      <div class="bnav-item act" id="bn-dash"    onclick="showView('dash')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+        Inicio
+      </div>
+      <div class="bnav-item"     id="bn-transfer" onclick="showView('transfer')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+        Enviar
+      </div>
+      <div class="bnav-item"     id="bn-reports"  onclick="showView('reports')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        Reportes
+      </div>
+      <div class="bnav-item" onclick="doLogout()" style="color:#CF304A !important;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        Salir
+      </div>
+    </div>
+  </nav>
+</div>
+
+<script>
+// ══════════════════════════════════════════
+// SUPABASE INIT
+// ══════════════════════════════════════════
+const { createClient } = supabase;
+const sb = createClient(
+  'https://lktpaonqarghceodcxsg.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrdHBhb25xYXJnaGNlb2RjeHNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3NTE1NTksImV4cCI6MjA5MzMyNzU1OX0.9WZOCxHmz6YCISCVb72dC02v0AjeO7H-JQCheIu5IUE'
+);
+
+// ══════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════
+let CU       = null;   // auth user
+let CUS      = null;   // usuario row
+let receptor = null;   // validated receptor
+let pending  = null;   // pending usuario insert data
+let rtChans  = [];     // realtime channels
+
+// ══════════════════════════════════════════
+// UTILITIES
+// ══════════════════════════════════════════
+const $  = id => document.getElementById(id);
+const lo = () => $('loader').classList.remove('out');
+const hi = () => $('loader').classList.add('out');
+
+function toast(msg, type = 'info', ms = 4500) {
+  const ic = { ok: '✓', err: '✗', info: '◈' };
+  const cls = { ok: 'ok-t', err: 'err-t', info: 'inf-t' };
+  const el = document.createElement('div');
+  el.className = `toast ${cls[type]}`;
+  el.innerHTML = `<span class="toast-icon">${ic[type]}</span><span>${msg}</span>`;
+  $('toast-box').appendChild(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 350); }, ms);
+}
+
+function $$(v) { return '$' + parseFloat(v).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+
+function fmtDate(s) {
+  const d = new Date(s);
+  return d.toLocaleDateString('es-EC', { day:'2-digit', month:'short', year:'numeric' })
+    + ' ' + d.toLocaleTimeString('es-EC', { hour:'2-digit', minute:'2-digit' });
+}
+
+function fmtAcc(n) { return n ? n.replace(/(\d{4})(\d{4})(\d{2})/, '$1 $2 $3') : '—'; }
+
+function txCode() {
+  return 'TRX-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substring(2,8).toUpperCase();
+}
+
+async function genAccNum() {
+  let n, ex = true;
+  while (ex) {
+    n = String(Math.floor(Math.random() * 9000000000) + 1000000000);
+    const { data } = await sb.from('usuarios').select('id').eq('numero_cuenta', n).maybeSingle();
+    ex = !!data;
+  }
+  return n;
+}
+
+function copyAcc() {
+  const t = $('d-acc').textContent.replace(/\s/g, '');
+  if (t && t !== '—') navigator.clipboard.writeText(t).then(() => toast('Número de cuenta copiado', 'ok'));
+}
+
+// ══════════════════════════════════════════
+// AUTH TABS
+// ══════════════════════════════════════════
+function switchTab(tab) {
+  $('form-in').style.display  = tab === 'in'  ? 'block' : 'none';
+  $('form-reg').style.display = tab === 'reg' ? 'block' : 'none';
+  $('tab-in').className  = 'auth-tab ' + (tab === 'in'  ? 'act' : 'off');
+  $('tab-reg').className = 'auth-tab ' + (tab === 'reg' ? 'act' : 'off');
+}
+
+// ══════════════════════════════════════════
+// REGISTER
+// ══════════════════════════════════════════
+async function doRegister() {
+  const nom  = $('r-nom').value.trim().toUpperCase();
+  const mail = $('r-mail').value.trim().toLowerCase();
+  const tel  = $('r-tel').value.trim().toUpperCase();
+  const pw   = $('r-pass').value;
+
+  if (!nom || !mail || !tel || !pw)    { toast('Completa todos los campos', 'err'); return; }
+  if (pw.length < 6)                   { toast('Contraseña mínima 6 caracteres', 'err'); return; }
+  if (!mail.includes('@'))             { toast('Correo inválido', 'err'); return; }
+
+  const btn = $('btn-reg');
+  btn.disabled = true; btn.textContent = 'CREANDO CUENTA...';
+  lo();
+
+  try {
+    const numCuenta = await genAccNum();
+    pending = { nombres: nom, correo: mail.toUpperCase(), telefono: tel, numero_cuenta: numCuenta, saldo: 50.00 };
+
+    const { data, error } = await sb.auth.signUp({ email: mail, password: pw, options: { data: { nombres: nom, telefono: tel } } });
+    if (error) throw error;
+
+    if (!data.session) {
+      hi();
+      toast('Registro exitoso. Revisa tu correo para confirmar tu cuenta.', 'info', 8000);
+      btn.disabled = false; btn.textContent = 'CREAR CUENTA';
+      pending = null;
+      return;
+    }
+    // Session exists → onAuthStateChange fires → handles usuario insert
+  } catch (e) {
+    hi();
+    const msg = e.message?.includes('already registered') ? 'Este correo ya está registrado' : (e.message || 'Error al crear cuenta');
+    toast(msg, 'err');
+    btn.disabled = false; btn.textContent = 'CREAR CUENTA';
+    pending = null;
+  }
+}
+
+// ══════════════════════════════════════════
+// LOGIN
+// ══════════════════════════════════════════
+async function doLogin() {
+  const email = $('l-email').value.trim();
+  const pw    = $('l-pass').value;
+  if (!email || !pw) { toast('Ingresa tus credenciales', 'err'); return; }
+
+  const btn = $('btn-in');
+  btn.disabled = true; btn.textContent = 'VERIFICANDO...';
+  lo();
+
+  const { error } = await sb.auth.signInWithPassword({ email, password: pw });
+  if (error) {
+    hi();
+    toast(error.message.includes('Invalid') ? 'Correo o contraseña incorrectos' : error.message, 'err');
+    btn.disabled = false; btn.textContent = 'INGRESAR';
+  }
+}
+
+// ══════════════════════════════════════════
+// LOGOUT
+// ══════════════════════════════════════════
+async function doLogout() {
+  lo();
+  unRT();
+  await sb.auth.signOut();
+}
+
+// ══════════════════════════════════════════
+// SHOW APP / AUTH
+// ══════════════════════════════════════════
+function showApp() {
+  $('auth-sec').style.display = 'none';
+  $('app-sec').style.display  = 'block';
+}
+function showAuth() {
+  $('auth-sec').style.display = 'flex';
+  $('app-sec').style.display  = 'none';
+  CU = null; CUS = null; receptor = null;
+  $('btn-in').disabled = false; $('btn-in').textContent = 'INGRESAR';
+}
+
+// ══════════════════════════════════════════
+// LOAD USER DATA
+// ══════════════════════════════════════════
+async function loadCUS(uid) {
+  const { data } = await sb.from('usuarios').select('*').eq('user_id', uid).single();
+  return data;
+}
+
+// ══════════════════════════════════════════
+// UPDATE UI
+// ══════════════════════════════════════════
+function updateUI() {
+  if (!CUS) return;
+  const { nombres, numero_cuenta, saldo } = CUS;
+  const first = nombres.split(' ')[0];
+  const accFmt = fmtAcc(numero_cuenta);
+  const balFmt = $$(saldo);
+
+  // Sidebar
+  $('sb-av').textContent   = first.charAt(0);
+  $('sb-name').textContent = nombres;
+  $('sb-acc').textContent  = accFmt;
+  $('sb-bal').textContent  = balFmt;
+
+  // Dashboard
+  $('d-name').textContent = first;
+  $('d-bal').textContent  = balFmt;
+  $('d-acc').textContent  = accFmt;
+
+  // Transfer
+  $('tr-bal').textContent = balFmt;
+
+  // Reports
+  $('rp-bal').textContent = balFmt;
+}
+
+function flashBal() {
+  const el = $('d-bal');
+  el.style.animation = 'none';
+  el.offsetHeight;
+  el.style.animation = 'balanceUpdate 1.2s ease';
+}
+
+// ══════════════════════════════════════════
+// VIEWS
+// ══════════════════════════════════════════
+function showView(v) {
+  document.querySelectorAll('.view').forEach(el => el.classList.remove('act'));
+  $(`view-${v}`).classList.add('act');
+
+  ['dash','transfer','reports'].forEach(n => {
+    $(`sn-${n}`)?.classList.toggle('act', n === v);
+    $(`bn-${n}`)?.classList.toggle('act', n === v);
+  });
+
+  if (v === 'dash')    renderDashTxs();
+  if (v === 'reports') renderReports();
+}
+
+// ══════════════════════════════════════════
+// TRANSACTIONS
+// ══════════════════════════════════════════
+async function getTxs(lim = 10) {
+  if (!CUS) return [];
+  const { data } = await sb
+    .from('transacciones')
+    .select('*, emisor:emisor_id(nombres,numero_cuenta), receptor:receptor_id(nombres,numero_cuenta)')
+    .or(`emisor_id.eq.${CUS.id},receptor_id.eq.${CUS.id}`)
+    .order('created_at', { ascending: false })
+    .limit(lim);
+  return data || [];
+}
+
+function txHTML(tx) {
+  const out   = tx.emisor_id === CUS.id;
+  const other = out ? (tx.receptor?.nombres || 'USUARIO') : (tx.emisor?.nombres || 'USUARIO');
+  const color = out ? '#CF304A' : '#03A66D';
+  const icon  = out
+    ? '<path d="M4 12l8-8 8 8H16v8H8v-8H4z"/>'
+    : '<path d="M4 12l8 8 8-8h-4V4H8v8H4z"/>';
+  return `
+    <div class="tx-row">
+      <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1;">
+        <div style="width:42px;height:42px;border-radius:50%;background:${color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="${color}">${icon}</svg>
+        </div>
+        <div style="min-width:0;">
+          <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${other}</div>
+          <div style="font-size:11px;color:#848E9C;font-family:'DM Mono',monospace;margin-top:2px;">${fmtDate(tx.created_at)}</div>
+        </div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;margin-left:16px;">
+        <div class="mono" style="font-size:15px;font-weight:700;color:${color};">${out ? '−' : '+'}${$$(tx.monto)}</div>
+        <div style="font-size:10px;color:#848E9C;font-family:'DM Mono',monospace;margin-top:2px;letter-spacing:0.5px;">${tx.codigo_transaccion.substring(0,14)}</div>
+      </div>
+    </div>`;
+}
+
+async function renderDashTxs() {
+  $('d-txs').innerHTML = '<div class="empty">Cargando...</div>';
+  const txs = await getTxs(8);
+  if (!txs.length) { $('d-txs').innerHTML = '<div class="empty">Sin movimientos aún</div>'; return; }
+
+  let sent = 0, recv = 0;
+  let html = '';
+  txs.forEach(tx => {
+    if (tx.emisor_id === CUS.id) sent += +tx.monto; else recv += +tx.monto;
+    html += txHTML(tx);
+  });
+  $('d-txs').innerHTML = html;
+  $('d-sent').textContent  = $$(sent);
+  $('d-recv').textContent  = $$(recv);
+  $('d-count').textContent = txs.length;
+}
+
+async function renderReports() {
+  $('rp-txs').innerHTML = '<div class="empty">Cargando...</div>';
+  const txs = await getTxs(200);
+
+  let sent = 0, recv = 0;
+  let html = '';
+  txs.forEach(tx => {
+    if (tx.emisor_id === CUS.id) sent += +tx.monto; else recv += +tx.monto;
+    html += txHTML(tx);
+  });
+
+  $('rp-sent').textContent = $$(sent);
+  $('rp-recv').textContent = $$(recv);
+  $('rp-cnt').textContent  = txs.length;
+  $('rp-bal').textContent  = $$(CUS.saldo);
+  $('rp-txs').innerHTML    = html || '<div class="empty">Sin movimientos registrados</div>';
+}
+
+// ══════════════════════════════════════════
+// VALIDATE ACCOUNT
+// ══════════════════════════════════════════
+async function validateAcc() {
+  const acc = $('tr-acc').value.trim();
+  if (acc.length !== 10)          { toast('Número de cuenta inválido (debe tener 10 dígitos)', 'err'); return; }
+  if (acc === CUS.numero_cuenta)  { toast('No puedes transferirte a ti mismo', 'err'); return; }
+
+  const btn = $('btn-val');
+  btn.disabled = true; btn.textContent = '...';
+
+  const { data, error } = await sb
+    .from('usuarios')
+    .select('id, nombres, numero_cuenta, saldo')
+    .eq('numero_cuenta', acc)
+    .maybeSingle();
+
+  btn.disabled = false; btn.textContent = 'VALIDAR';
+
+  if (error || !data) {
+    toast('Número de cuenta no encontrado', 'err');
+    $('verified-box').style.display = 'none';
+    $('tr-step2').style.display     = 'none';
+    $('tr-hint').style.display      = 'block';
+    receptor = null;
+    return;
+  }
+
+  receptor = data;
+  $('verified-name').textContent = data.nombres;
+  $('verified-box').style.display = 'block';
+  $('tr-step2').style.display     = 'block';
+  $('tr-hint').style.display      = 'none';
+  toast(`Cuenta verificada: ${data.nombres}`, 'ok');
+}
+
+// ══════════════════════════════════════════
+// DO TRANSFER
+// ══════════════════════════════════════════
+async function doTransfer() {
+  if (!receptor)                                { toast('Valida la cuenta destino primero', 'err'); return; }
+
+  const monto = parseFloat($('tr-amt').value);
+  if (!monto || monto <= 0)                     { toast('Ingresa un monto válido mayor a $0', 'err'); return; }
+  if (monto > CUS.saldo)                        { toast(`Saldo insuficiente. Disponible: ${$$(CUS.saldo)}`, 'err'); return; }
+  if (monto < 0.01)                             { toast('Monto mínimo $0.01', 'err'); return; }
+
+  const btn = $('btn-tr');
+  btn.disabled = true; btn.textContent = 'PROCESANDO...';
+  lo();
+
+  const codigo = txCode();
+  try {
+    const { error } = await sb.rpc('realizar_transferencia', {
+      p_emisor_id:      CUS.id,
+      p_receptor_id:    receptor.id,
+      p_monto:          monto,
+      p_cuenta_destino: receptor.numero_cuenta,
+      p_codigo:         codigo
+    });
+    if (error) throw error;
+
+    // Update local saldo
+    CUS.saldo -= monto;
+    updateUI();
+    flashBal();
+
+    hi();
+    btn.disabled = false; btn.textContent = '✓ CONFIRMAR TRANSFERENCIA';
+
+    // Show receipt
+    showReceipt({ codigo, emisor: CUS.nombres, receptor: receptor.nombres, cuenta: receptor.numero_cuenta, monto, ts: new Date().toISOString() });
+
+    // Reset form
+    $('tr-acc').value = '';
+    $('tr-amt').value = '';
+    $('verified-box').style.display = 'none';
+    $('tr-step2').style.display     = 'none';
+    $('tr-hint').style.display      = 'block';
+    receptor = null;
+
+    await renderDashTxs();
+  } catch (e) {
+    hi();
+    btn.disabled = false; btn.textContent = '✓ CONFIRMAR TRANSFERENCIA';
+    const msg = e.message?.includes('SALDO_INSUFICIENTE')
+      ? 'Saldo insuficiente para realizar esta transferencia'
+      : (e.message || 'Error al procesar la transferencia');
+    toast(msg, 'err');
+  }
+}
+
+// ══════════════════════════════════════════
+// RECEIPT
+// ══════════════════════════════════════════
+function showReceipt({ codigo, emisor, receptor, cuenta, monto, ts }) {
+  $('r-cod').textContent      = codigo;
+  $('r-fecha').textContent    = fmtDate(ts);
+  $('r-emisor').textContent   = emisor;
+  $('r-receptor').textContent = receptor;
+  $('r-cuenta').textContent   = fmtAcc(cuenta);
+  $('r-monto').textContent    = $$(monto);
+  $('rec-modal').classList.remove('hide');
+}
+
+function closeReceipt() { $('rec-modal').classList.add('hide'); }
+
+$('rec-modal').addEventListener('click', e => { if (e.target === $('rec-modal')) closeReceipt(); });
+
+// ══════════════════════════════════════════
+// REALTIME
+// ══════════════════════════════════════════
+function subRT() {
+  if (!CUS) return;
+
+  // New incoming transfer
+  const ch1 = sb.channel(`rt-tx-${CUS.id}`)
+    .on('postgres_changes', {
+      event:  'INSERT',
+      schema: 'public',
+      table:  'transacciones',
+      filter: `receptor_id=eq.${CUS.id}`
+    }, async payload => {
+      const m = payload.new.monto;
+      toast(`¡HA RECIBIDO UNA TRANSFERENCIA DE ${$$(m)}!`, 'ok', 7000);
+      const updated = await loadCUS(CU.id);
+      if (updated) { CUS = updated; updateUI(); flashBal(); }
+      renderDashTxs();
+    })
+    .subscribe();
+
+  // My saldo updates
+  const ch2 = sb.channel(`rt-us-${CUS.id}`)
+    .on('postgres_changes', {
+      event:  'UPDATE',
+      schema: 'public',
+      table:  'usuarios',
+      filter: `id=eq.${CUS.id}`
+    }, payload => {
+      CUS.saldo = payload.new.saldo;
+      updateUI();
+    })
+    .subscribe();
+
+  rtChans = [ch1, ch2];
+}
+
+function unRT() {
+  rtChans.forEach(c => sb.removeChannel(c));
+  rtChans = [];
+}
+
+// ══════════════════════════════════════════
+// AUTH STATE CHANGE
+// ══════════════════════════════════════════
+sb.auth.onAuthStateChange(async (event, session) => {
+  if (event === 'SIGNED_IN' && session) {
+    CU = session.user;
+    lo();
+
+    let userData = await loadCUS(CU.id);
+
+    if (!userData) {
+      // Create usuario record
+      const meta = CU.user_metadata || {};
+      const numCuenta = pending?.numero_cuenta || await genAccNum();
+      const insertData = pending || {
+        nombres:       (meta.nombres || CU.email?.split('@')[0] || 'USUARIO').toUpperCase(),
+        correo:        (CU.email || '').toUpperCase(),
+        telefono:      (meta.telefono || '').toUpperCase(),
+        numero_cuenta: numCuenta,
+        saldo:         50.00
+      };
+      pending = null;
+
+      const { error: ie } = await sb.from('usuarios').insert({ user_id: CU.id, ...insertData });
+      if (ie) { hi(); toast('Error al crear perfil de usuario: ' + ie.message, 'err'); return; }
+      userData = await loadCUS(CU.id);
+    } else {
+      pending = null;
+    }
+
+    if (!userData) { hi(); toast('Error al cargar datos del usuario', 'err'); return; }
+
+    CUS = userData;
+    updateUI();
+    showApp();
+    showView('dash');
+    subRT();
+    hi();
+
+    $('btn-in')?.setAttribute('disabled', false);
+    $('btn-in').disabled = false; $('btn-in').textContent = 'INGRESAR';
+    $('btn-reg').disabled = false; $('btn-reg').textContent = 'CREAR CUENTA';
+
+    toast(`Bienvenido, ${CUS.nombres.split(' ')[0]}`, 'ok');
+
+  } else if (event === 'SIGNED_OUT') {
+    showAuth();
+    hi();
+  }
+});
+
+// ══════════════════════════════════════════
+// KEY LISTENERS
+// ══════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    if (document.activeElement === $('l-pass'))   doLogin();
+    if (document.activeElement === $('l-email'))  doLogin();
+    if (document.activeElement === $('tr-acc'))   validateAcc();
+    if (document.activeElement === $('tr-amt'))   doTransfer();
+  }
+  if (e.key === 'Escape') closeReceipt();
+});
+
+// ══════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) {
+    hi();
+    showAuth();
+  }
+  // If session exists, onAuthStateChange handles it
+})();
+</script>
 </body>
 </html>
