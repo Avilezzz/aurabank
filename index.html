@@ -1,61 +1,63 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Estado del Servicio - Banca Web</title>
-    <!-- Importación de Tailwind CSS -->
-    <script src="https://tailwindcss.com"></script>
+
+    <!-- Tailwind CSS correcto -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 </head>
-<body class="bg-gray-100 h-screen flex items-center justify-center">
+<body class="bg-gray-100 min-h-screen">
 
-    <!-- BOTÓN PARA PROBAR (Simula que entras a la web) -->
-    <button id="openModal" class="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition">
-        Entrar a Banca Web
-    </button>
-
-    <!-- ESTRUCTURA DEL MODAL -->
-    <div id="modalOverlay" class="fixed inset-0 z-50 hidden transition-opacity">
+    <!-- MODAL ESTÁTICO SIEMPRE VISIBLE -->
+    <div id="modalOverlay" class="fixed inset-0 z-50">
         
-        <!-- Backdrop (Fondo oscuro desenfocado) -->
+        <!-- Fondo oscuro -->
         <div class="absolute inset-0 bg-gray-900/80 backdrop-blur-sm"></div>
 
-        <!-- Contenedor del Modal -->
-        <div class="relative flex items-center justify-center min-h-screen p-4">
+        <!-- Contenedor -->
+        <div class="relative flex min-h-screen items-center justify-center p-4">
             
-            <div class="bg-white rounded-3xl shadow-2xl overflow-hidden max-w-md w-full transform transition-all scale-100">
+            <div class="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl">
                 
-                <!-- Barra superior de color (Indica error) -->
+                <!-- Barra superior -->
                 <div class="h-2 bg-red-600"></div>
 
                 <div class="p-8">
-                    <!-- Icono de Advertencia Animado -->
-                    <div class="mx-auto flex items-center justify-center h-20 w-20 rounded-full bg-red-100 mb-6 animate-pulse">
+                    <!-- Icono -->
+                    <div class="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-red-100 animate-pulse">
                         <svg class="h-12 w-12 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                            />
                         </svg>
                     </div>
 
-                    <!-- Texto del Mensaje -->
+                    <!-- Texto -->
                     <div class="text-center">
-                        <h1 class="text-3xl font-black text-gray-900 uppercase tracking-tight mb-3">
+                        <h1 class="mb-3 text-3xl font-black uppercase tracking-tight text-gray-900">
                             Banca Web Caída
                         </h1>
-                        <p class="text-lg text-gray-500 leading-relaxed">
-                            Estamos realizando un mantenimiento de emergencia en nuestros servidores. 
-                            <span class="block mt-2 font-bold text-red-600 underline">Vuelve a intentarlo mañana.</span>
+                        <p class="text-lg leading-relaxed text-gray-500">
+                            Estamos realizando un mantenimiento de emergencia en nuestros servidores.
+                            <span class="mt-2 block font-bold text-red-600 underline">
+                                Vuelve a intentarlo mañana.
+                            </span>
                         </p>
                     </div>
 
-                    <!-- Botón de Acción -->
+                    <!-- Botón estático -->
                     <div class="mt-8">
-                        <button id="closeModal" class="w-full py-4 bg-gray-900 text-white text-lg font-bold rounded-2xl hover:bg-gray-800 active:scale-95 transition-all shadow-lg">
+                        <button class="w-full rounded-2xl bg-gray-900 py-4 text-lg font-bold text-white shadow-lg transition hover:bg-gray-800 active:scale-95">
                             ENTENDIDO
                         </button>
                     </div>
 
-                    <!-- Pie de página del modal -->
+                    <!-- Footer -->
                     <p class="mt-4 text-center text-xs text-gray-400">
                         Código de error: 503 SERVICE_UNAVAILABLE
                     </p>
@@ -63,30 +65,6 @@
             </div>
         </div>
     </div>
-
-    <!-- LÓGICA DE APERTURA Y CIERRE -->
-    <script>
-        const modal = document.getElementById('modalOverlay');
-        const btnOpen = document.getElementById('openModal');
-        const btnClose = document.getElementById('closeModal');
-
-        // Función para abrir
-        btnOpen.onclick = () => {
-            modal.classList.remove('hidden');
-        };
-
-        // Función para cerrar
-        btnClose.onclick = () => {
-            modal.classList.add('hidden');
-        };
-
-        // Cerrar si hacen clic fuera del cuadro blanco
-        window.onclick = (event) => {
-            if (event.target == modal.querySelector('.relative')) {
-                modal.classList.add('hidden');
-            }
-        };
-    </script>
 
 </body>
 </html>
