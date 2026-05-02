@@ -1,0 +1,1439 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <!--
+    ╔══════════════════════════════════════════════════════════════════╗
+    ║         BANCO DIGITAL - App Fintech Mobile-First                 ║
+    ║  Tecnologías: HTML5, Tailwind CSS v3 (CDN), JavaScript Vanilla  ║
+    ║  Almacenamiento: localStorage (sin backend)                      ║
+    ╚══════════════════════════════════════════════════════════════════╝
+  -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#000000" />
+  <title>AuraBank · Banca Digital</title>
+
+  <!-- Tailwind CSS v3 via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts: Sora (display) + DM Sans (body) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Tailwind Config personalizado -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            gold: { DEFAULT: '#facc15', dark: '#eab308', light: '#fde68a' },
+            ink:  { DEFAULT: '#0a0a0a', card: '#141414', border: '#1f1f1f' }
+          },
+          fontFamily: {
+            display: ['Sora', 'sans-serif'],
+            body: ['DM Sans', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* ═══════════════════════════════════════
+       VARIABLES Y RESET GLOBAL
+    ════════════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; padding: 0;
+      background: #000;
+      font-family: 'DM Sans', sans-serif;
+      color: #fff;
+      height: 100%;
+      overflow-x: hidden;
+    }
+
+    /* Contenedor principal tipo "celular" centrado */
+    #app-shell {
+      width: 100%;
+      max-width: 430px;
+      min-height: 100vh;
+      margin: 0 auto;
+      background: #0a0a0a;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* ═══════════════════════════════════════
+       FUENTES Y TEXTO
+    ════════════════════════════════════════ */
+    .font-display { font-family: 'Sora', sans-serif; }
+    .money-amount  { font-family: 'Sora', sans-serif; font-weight: 800; letter-spacing: -0.03em; }
+
+    /* ═══════════════════════════════════════
+       PANTALLAS - visibles/ocultas con JS
+    ════════════════════════════════════════ */
+    .screen { display: none; min-height: 100vh; flex-direction: column; }
+    .screen.active { display: flex; }
+
+    /* ═══════════════════════════════════════
+       SPLASH SCREEN
+    ════════════════════════════════════════ */
+    #screen-splash {
+      background: #000;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .splash-logo {
+      font-family: 'Sora', sans-serif;
+      font-size: 2.5rem;
+      font-weight: 800;
+      color: #facc15;
+      letter-spacing: -0.04em;
+    }
+    .splash-sub { color: #555; font-size: 0.8rem; letter-spacing: 0.15em; text-transform: uppercase; }
+
+    /* Spinner circular amarillo */
+    .spinner {
+      width: 44px; height: 44px;
+      border: 3px solid #1f1f1f;
+      border-top-color: #facc15;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ═══════════════════════════════════════
+       LOGIN SCREEN
+    ════════════════════════════════════════ */
+    #screen-login {
+      background: #0a0a0a;
+      padding: 0;
+      justify-content: flex-end;
+    }
+    .login-bg {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(250,204,21,0.18) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .login-card {
+      background: #111;
+      border-radius: 28px 28px 0 0;
+      padding: 32px 24px 40px;
+      border-top: 1px solid #1f1f1f;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ═══════════════════════════════════════
+       INPUTS ESTILIZADOS
+    ════════════════════════════════════════ */
+    .input-field {
+      width: 100%;
+      background: #1a1a1a;
+      border: 1.5px solid #2a2a2a;
+      border-radius: 14px;
+      padding: 14px 16px;
+      color: #fff;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+      -webkit-appearance: none;
+    }
+    .input-field:focus { border-color: #facc15; }
+    .input-field::placeholder { color: #444; }
+    .input-field[type="number"]::-webkit-inner-spin-button { display: none; }
+
+    /* Contenedor input con ícono */
+    .input-wrapper { position: relative; }
+    .input-wrapper .input-icon {
+      position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+      color: #444; cursor: pointer; transition: color 0.2s; padding: 4px;
+    }
+    .input-wrapper .input-icon:hover { color: #facc15; }
+
+    /* ═══════════════════════════════════════
+       BOTONES
+    ════════════════════════════════════════ */
+    .btn-primary {
+      width: 100%;
+      background: #facc15;
+      color: #000;
+      font-family: 'Sora', sans-serif;
+      font-weight: 700;
+      font-size: 1rem;
+      padding: 16px;
+      border-radius: 14px;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.12s, box-shadow 0.2s, background 0.2s;
+      box-shadow: 0 4px 20px rgba(250,204,21,0.25);
+      position: relative;
+      overflow: hidden;
+      min-height: 54px;
+    }
+    .btn-primary:active { transform: scale(0.97); box-shadow: 0 2px 10px rgba(250,204,21,0.15); }
+    .btn-primary:hover { background: #fde047; }
+
+    .btn-secondary {
+      background: transparent;
+      border: 1.5px solid #2a2a2a;
+      color: #aaa;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 0.9rem;
+      padding: 12px 20px;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s, transform 0.1s;
+      min-height: 44px;
+    }
+    .btn-secondary:active { transform: scale(0.97); border-color: #facc15; color: #facc15; }
+
+    /* Ripple effect en botones */
+    .ripple {
+      position: absolute; border-radius: 50%;
+      background: rgba(0,0,0,0.2);
+      transform: scale(0);
+      animation: ripple-anim 0.5s linear;
+      pointer-events: none;
+    }
+    @keyframes ripple-anim { to { transform: scale(4); opacity: 0; } }
+
+    /* ═══════════════════════════════════════
+       MODAL DE BIENVENIDA
+    ════════════════════════════════════════ */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 100;
+      background: rgba(0,0,0,0.85);
+      display: flex; align-items: flex-end; justify-content: center;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.3s;
+    }
+    .modal-overlay.show { opacity: 1; pointer-events: all; }
+    .modal-content {
+      background: #111;
+      border-radius: 28px 28px 0 0;
+      padding: 32px 24px 48px;
+      width: 100%; max-width: 430px;
+      border-top: 1px solid #2a2a2a;
+      transform: translateY(100%);
+      transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .modal-overlay.show .modal-content { transform: translateY(0); }
+    .modal-emoji { font-size: 3rem; margin-bottom: 12px; }
+    .modal-gift-badge {
+      display: inline-block;
+      background: rgba(250,204,21,0.15);
+      border: 1px solid rgba(250,204,21,0.4);
+      color: #facc15;
+      font-family: 'Sora', sans-serif;
+      font-weight: 700;
+      font-size: 2rem;
+      padding: 8px 20px;
+      border-radius: 12px;
+      margin: 12px 0;
+    }
+
+    /* ═══════════════════════════════════════
+       DASHBOARD
+    ════════════════════════════════════════ */
+    #screen-dashboard {
+      background: #0a0a0a;
+      padding: 0;
+    }
+    .dashboard-header {
+      padding: 52px 20px 20px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .logo-text {
+      font-family: 'Sora', sans-serif;
+      font-weight: 800; font-size: 1.4rem;
+      color: #facc15; letter-spacing: -0.03em;
+    }
+    .logo-dot { color: #fff; }
+
+    /* Tarjeta de saldo */
+    .balance-card {
+      margin: 0 16px 20px;
+      background: linear-gradient(135deg, #1a1400 0%, #141414 60%);
+      border: 1px solid rgba(250,204,21,0.25);
+      border-radius: 24px;
+      padding: 28px 24px;
+      position: relative;
+      overflow: hidden;
+    }
+    .balance-card::before {
+      content: '';
+      position: absolute; top: -40px; right: -40px;
+      width: 160px; height: 160px;
+      background: radial-gradient(circle, rgba(250,204,21,0.12) 0%, transparent 70%);
+      border-radius: 50%;
+    }
+    .balance-label { color: #666; font-size: 0.8rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
+    .balance-amount { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 2.8rem; letter-spacing: -0.04em; color: #fff; }
+    .balance-currency { color: #facc15; font-size: 1.1rem; font-weight: 700; margin-right: 4px; }
+    .balance-eye { background: none; border: none; cursor: pointer; color: #555; padding: 4px; }
+
+    /* Botones de acción rápida */
+    .quick-actions {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 10px; padding: 0 16px 24px;
+    }
+    .quick-btn {
+      background: #141414;
+      border: 1px solid #1f1f1f;
+      border-radius: 16px;
+      padding: 16px 8px;
+      display: flex; flex-direction: column;
+      align-items: center; gap: 8px;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s, transform 0.1s;
+      min-height: 80px;
+    }
+    .quick-btn:active { transform: scale(0.95); background: #1a1a1a; border-color: #facc15; }
+    .quick-btn-icon { font-size: 1.4rem; }
+    .quick-btn-label { color: #888; font-size: 0.72rem; font-weight: 500; text-align: center; }
+
+    /* Botón transferir prominente */
+    .transfer-fab {
+      margin: 0 16px 24px;
+    }
+
+    /* Sección de transacciones */
+    .section-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 20px 14px;
+    }
+    .section-title { font-family: 'Sora', sans-serif; font-weight: 700; font-size: 1rem; }
+    .section-link { color: #facc15; font-size: 0.8rem; font-weight: 500; cursor: pointer; }
+
+    .tx-list { padding: 0 16px; flex: 1; overflow-y: auto; padding-bottom: 80px; }
+    .tx-item {
+      background: #141414;
+      border: 1px solid #1f1f1f;
+      border-radius: 16px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      display: flex; align-items: center; gap: 14px;
+      transition: background 0.15s;
+    }
+    .tx-item:active { background: #1a1a1a; }
+    .tx-avatar {
+      width: 44px; height: 44px; border-radius: 50%;
+      background: linear-gradient(135deg, #facc15, #eab308);
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Sora', sans-serif; font-weight: 800;
+      font-size: 1rem; color: #000; flex-shrink: 0;
+    }
+    .tx-info { flex: 1; min-width: 0; }
+    .tx-name { font-weight: 600; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tx-date { color: #555; font-size: 0.75rem; margin-top: 2px; }
+    .tx-amount { font-family: 'Sora', sans-serif; font-weight: 700; font-size: 1rem; color: #ff6b6b; white-space: nowrap; }
+    .tx-status { font-size: 0.65rem; color: #facc15; margin-top: 2px; text-align: right; }
+
+    .tx-empty {
+      text-align: center; padding: 40px 20px;
+      color: #333; font-size: 0.9rem;
+    }
+    .tx-empty-icon { font-size: 2.5rem; margin-bottom: 8px; }
+
+    /* Badge de notificaciones */
+    .notif-btn { position: relative; background: none; border: none; cursor: pointer; padding: 8px; }
+    .notif-badge {
+      position: absolute; top: 6px; right: 6px;
+      width: 8px; height: 8px;
+      background: #facc15;
+      border-radius: 50%;
+      border: 2px solid #0a0a0a;
+    }
+
+    /* ═══════════════════════════════════════
+       PANTALLA DE TRANSFERENCIA
+    ════════════════════════════════════════ */
+    #screen-transfer {
+      background: #0a0a0a;
+    }
+    .transfer-header {
+      padding: 52px 20px 24px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    .back-btn {
+      width: 40px; height: 40px;
+      background: #141414; border: 1px solid #1f1f1f;
+      border-radius: 12px; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; flex-shrink: 0;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    }
+    .back-btn:active { transform: scale(0.92); border-color: #facc15; }
+
+    .transfer-body { padding: 0 16px; overflow-y: auto; flex: 1; padding-bottom: 40px; }
+
+    /* Secciones del formulario */
+    .form-section {
+      background: #141414;
+      border: 1px solid #1f1f1f;
+      border-radius: 20px;
+      padding: 20px;
+      margin-bottom: 14px;
+    }
+    .form-section-title {
+      font-family: 'Sora', sans-serif;
+      font-weight: 700; font-size: 0.78rem;
+      color: #facc15; letter-spacing: 0.1em;
+      text-transform: uppercase; margin-bottom: 16px;
+    }
+    .form-group { margin-bottom: 14px; }
+    .form-group:last-child { margin-bottom: 0; }
+    .form-label { color: #666; font-size: 0.78rem; font-weight: 500; margin-bottom: 6px; display: block; }
+
+    /* Selector de moneda */
+    .currency-select {
+      width: 100%;
+      background: #1a1a1a;
+      border: 1.5px solid #2a2a2a;
+      border-radius: 14px;
+      padding: 14px 16px;
+      color: #fff;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 1rem;
+      outline: none;
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23555' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 16px center;
+      cursor: pointer;
+    }
+    .currency-select:focus { border-color: #facc15; }
+    .currency-select option { background: #1a1a1a; }
+
+    /* Disponible en input de monto */
+    .amount-hint { color: #555; font-size: 0.75rem; margin-top: 6px; }
+    .amount-hint span { color: #facc15; font-weight: 600; }
+
+    /* ═══════════════════════════════════════
+       PANTALLA DE ÉXITO / PROCESANDO
+    ════════════════════════════════════════ */
+    #screen-success {
+      background: #0a0a0a;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 40px 24px;
+    }
+
+    /* Círculo de progreso animado */
+    .progress-circle-wrap { position: relative; width: 140px; height: 140px; margin: 0 auto 28px; }
+    .progress-circle {
+      width: 140px; height: 140px;
+      transform: rotate(-90deg);
+    }
+    .progress-track { fill: none; stroke: #1f1f1f; stroke-width: 6; }
+    .progress-bar  { fill: none; stroke: #facc15; stroke-width: 6; stroke-linecap: round;
+      stroke-dasharray: 377; stroke-dashoffset: 377;
+      animation: fill-circle 2s ease-in-out forwards;
+      transition: stroke-dashoffset 0.3s;
+    }
+    @keyframes fill-circle { to { stroke-dashoffset: 0; } }
+
+    .progress-center {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 2px;
+    }
+    .progress-icon { font-size: 2.2rem; }
+    .countdown {
+      font-family: 'Sora', sans-serif;
+      font-weight: 800; font-size: 1rem;
+      color: #facc15; letter-spacing: 0.05em;
+    }
+
+    /* ═══════════════════════════════════════
+       VOUCHER / COMPROBANTE
+    ════════════════════════════════════════ */
+    #screen-voucher {
+      background: #0a0a0a;
+      padding: 0;
+      align-items: center;
+    }
+    .voucher-header {
+      width: 100%; padding: 52px 20px 20px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    .voucher-body { padding: 0 16px 40px; width: 100%; overflow-y: auto; }
+
+    /* El ticket con borde punteado */
+    .voucher-ticket {
+      background: #111;
+      border: 2px dashed rgba(250,204,21,0.4);
+      border-radius: 24px;
+      padding: 28px 24px;
+      position: relative;
+    }
+    /* Círculos decorativos a los lados */
+    .voucher-ticket::before, .voucher-ticket::after {
+      content: '';
+      position: absolute;
+      width: 24px; height: 24px;
+      background: #0a0a0a;
+      border-radius: 50%;
+      top: 50%;
+    }
+    .voucher-ticket::before { left: -13px; }
+    .voucher-ticket::after  { right: -13px; }
+
+    .voucher-brand { text-align: center; margin-bottom: 20px; }
+    .voucher-status-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3);
+      color: #22c55e; border-radius: 20px; padding: 4px 14px;
+      font-size: 0.78rem; font-weight: 600; margin-top: 8px;
+    }
+    .voucher-divider {
+      border: none; border-top: 1px dashed #2a2a2a; margin: 20px 0;
+    }
+    .voucher-row {
+      display: flex; justify-content: space-between;
+      align-items: baseline; margin-bottom: 12px;
+    }
+    .voucher-key { color: #555; font-size: 0.8rem; }
+    .voucher-val { color: #ddd; font-size: 0.85rem; font-weight: 500; text-align: right; max-width: 55%; word-break: break-all; }
+    .voucher-amount-row { text-align: center; padding: 20px 0; }
+    .voucher-amount-label { color: #666; font-size: 0.75rem; margin-bottom: 4px; }
+    .voucher-amount-value { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 2.2rem; color: #facc15; letter-spacing: -0.03em; }
+    .voucher-id { text-align: center; color: #333; font-size: 0.7rem; font-family: monospace; margin-top: 20px; }
+
+    /* ═══════════════════════════════════════
+       TOAST NOTIFICATIONS
+    ════════════════════════════════════════ */
+    #toast-container {
+      position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+      z-index: 9999; width: calc(100% - 32px); max-width: 398px;
+      display: flex; flex-direction: column; gap: 8px;
+      pointer-events: none;
+    }
+    .toast {
+      background: #1a1a1a;
+      border-radius: 14px;
+      padding: 14px 16px 18px;
+      display: flex; align-items: flex-start; gap: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      border: 1px solid #2a2a2a;
+      transform: translateY(-110%) scale(0.9);
+      opacity: 0;
+      transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s;
+      position: relative; overflow: hidden;
+      pointer-events: all;
+    }
+    .toast.show { transform: translateY(0) scale(1); opacity: 1; }
+    .toast-icon { font-size: 1.2rem; flex-shrink: 0; margin-top: 1px; }
+    .toast-body { flex: 1; }
+    .toast-title { font-weight: 600; font-size: 0.88rem; margin-bottom: 2px; }
+    .toast-msg { color: #888; font-size: 0.8rem; line-height: 1.4; }
+    /* Barra de progreso del toast */
+    .toast-progress {
+      position: absolute; bottom: 0; left: 0; height: 3px;
+      border-radius: 0 0 14px 14px;
+      animation: toast-bar 3.5s linear forwards;
+    }
+    @keyframes toast-bar { from { width: 100%; } to { width: 0%; } }
+    .toast-success .toast-icon { color: #22c55e; }
+    .toast-success .toast-progress { background: #22c55e; }
+    .toast-error   .toast-icon { color: #ef4444; }
+    .toast-error   .toast-progress { background: #ef4444; }
+    .toast-info    .toast-icon { color: #3b82f6; }
+    .toast-info    .toast-progress { background: #3b82f6; }
+    .toast-warning .toast-icon { color: #facc15; }
+    .toast-warning .toast-progress { background: #facc15; }
+
+    /* ═══════════════════════════════════════
+       MISCELÁNEA / UTILIDADES
+    ════════════════════════════════════════ */
+    .screen-title {
+      font-family: 'Sora', sans-serif;
+      font-weight: 700; font-size: 1.2rem;
+    }
+    .hide { display: none !important; }
+
+    /* Pull-to-refresh visual */
+    .refresh-btn {
+      background: #141414; border: 1px solid #1f1f1f;
+      border-radius: 20px; padding: 6px 14px;
+      color: #555; font-size: 0.75rem;
+      cursor: pointer; display: flex; align-items: center; gap: 5px;
+      transition: border-color 0.2s, color 0.2s, transform 0.1s;
+    }
+    .refresh-btn:active { transform: scale(0.95); border-color: #facc15; color: #facc15; }
+    .refresh-icon { transition: transform 0.5s; }
+    .refresh-icon.spinning { transform: rotate(360deg); }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+
+    /* Animación count-up del saldo */
+    @keyframes count-up {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .balance-animate { animation: count-up 0.6s ease-out forwards; }
+  </style>
+</head>
+
+<body>
+<!-- ═══════════════════════════════════════════════════════════
+     APP SHELL - Contenedor principal tipo "celular"
+════════════════════════════════════════════════════════════ -->
+<div id="app-shell">
+
+  <!-- ─────────────────────────────────────────
+       SPLASH SCREEN (1.5s al cargar la app)
+  ───────────────────────────────────────── -->
+  <div id="screen-splash" class="screen active">
+    <div class="splash-logo">Aura<span style="color:#fff">Bank</span></div>
+    <div class="splash-sub">Tu dinero, tu ritmo</div>
+    <div class="spinner"></div>
+  </div>
+
+  <!-- ─────────────────────────────────────────
+       LOGIN SCREEN
+  ───────────────────────────────────────── -->
+  <div id="screen-login" class="screen" style="min-height:100vh;">
+    <!-- Fondo decorativo con gradiente amarillo -->
+    <div class="login-bg"></div>
+
+    <!-- Logo centrado en la parte superior -->
+    <div style="flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; padding-top:60px;">
+      <div style="width:64px;height:64px;background:#facc15;border-radius:20px;display:flex;align-items:center;justify-content:center;">
+        <span style="font-size:1.8rem;">💳</span>
+      </div>
+      <div class="splash-logo" style="font-size:2rem;">Aura<span style="color:#fff">Bank</span></div>
+      <p style="color:#444;font-size:0.85rem;margin:0;">Banca digital para el futuro</p>
+    </div>
+
+    <!-- Tarjeta de login -->
+    <div class="login-card">
+      <h2 class="font-display" style="font-weight:800;font-size:1.5rem;margin-bottom:4px;">Iniciar sesión</h2>
+      <p style="color:#555;font-size:0.85rem;margin-bottom:24px;">Credenciales de prueba: admin / 1234</p>
+
+      <!-- Campo usuario -->
+      <div class="form-group" style="margin-bottom:14px;">
+        <label class="form-label">Usuario</label>
+        <div class="input-wrapper">
+          <input id="login-user" type="text" class="input-field" placeholder="admin" autocomplete="off" />
+          <span class="input-icon">👤</span>
+        </div>
+      </div>
+
+      <!-- Campo contraseña con toggle de visibilidad -->
+      <div class="form-group" style="margin-bottom:24px;">
+        <label class="form-label">Contraseña</label>
+        <div class="input-wrapper">
+          <input id="login-pass" type="password" class="input-field" placeholder="••••••" />
+          <span class="input-icon" id="toggle-pass" onclick="togglePassword()">👁️</span>
+        </div>
+      </div>
+
+      <!-- Botón login con ripple -->
+      <button class="btn-primary" onclick="handleLogin(event)">
+        Ingresar a mi cuenta
+      </button>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────
+       MODAL DE BIENVENIDA (overlay)
+  ───────────────────────────────────────── -->
+  <div id="modal-welcome" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-emoji">🎉</div>
+      <h2 class="font-display" style="font-weight:800;font-size:1.4rem;margin-bottom:8px;">¡Bienvenido!</h2>
+      <p style="color:#888;font-size:0.9rem;line-height:1.5;margin-bottom:16px;">
+        Tu cuenta ha sido activada exitosamente. Te regalamos saldo inicial para que empieces a explorar AuraBank.
+      </p>
+      <div class="modal-gift-badge">💵 $100.00 USD</div>
+      <p style="color:#555;font-size:0.8rem;margin-bottom:24px;">Tu saldo ya está disponible para transferir</p>
+      <button class="btn-primary" onclick="closeWelcome()">Comenzar ahora ✦</button>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────
+       DASHBOARD (Pantalla principal)
+  ───────────────────────────────────────── -->
+  <div id="screen-dashboard" class="screen" style="overflow-y:auto;">
+
+    <!-- Header con logo y notificaciones -->
+    <div class="dashboard-header">
+      <div>
+        <div class="logo-text">Aura<span class="logo-dot">Bank</span></div>
+        <div style="color:#555;font-size:0.78rem;margin-top:2px;" id="dash-greeting">Buenos días 👋</div>
+      </div>
+      <button class="notif-btn" onclick="showNotifications()">
+        <span style="font-size:1.4rem;">🔔</span>
+        <div class="notif-badge" id="notif-badge"></div>
+      </button>
+    </div>
+
+    <!-- Tarjeta de saldo -->
+    <div class="balance-card">
+      <div class="balance-label">Saldo disponible</div>
+      <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:12px;">
+        <span class="balance-currency">USD</span>
+        <span class="balance-amount" id="balance-display">0.00</span>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="color:#555;font-size:0.78rem;">**** **** **** 4821</div>
+        <div style="background:rgba(250,204,21,0.15);border:1px solid rgba(250,204,21,0.3);
+          color:#facc15;font-size:0.7rem;font-weight:600;padding:3px 10px;border-radius:20px;">
+          ACTIVA
+        </div>
+      </div>
+    </div>
+
+    <!-- Acciones rápidas -->
+    <div class="quick-actions">
+      <button class="quick-btn" onclick="goToTransfer()">
+        <span class="quick-btn-icon">📤</span>
+        <span class="quick-btn-label">Transferir</span>
+      </button>
+      <button class="quick-btn" onclick="showToast('info','📊 Reportes','Función próximamente disponible')">
+        <span class="quick-btn-icon">📊</span>
+        <span class="quick-btn-label">Reportes</span>
+      </button>
+      <button class="quick-btn" onclick="handleLogout()">
+        <span class="quick-btn-icon">🚪</span>
+        <span class="quick-btn-label">Salir</span>
+      </button>
+    </div>
+
+    <!-- Botón principal de transferencia -->
+    <div class="transfer-fab">
+      <button class="btn-primary" onclick="goToTransfer(event)" style="display:flex;align-items:center;justify-content:center;gap:10px;">
+        <span style="font-size:1.1rem;">✈️</span>
+        <span>Nueva transferencia</span>
+      </button>
+    </div>
+
+    <!-- Header de transacciones -->
+    <div class="section-header">
+      <div class="section-title">Últimas transferencias</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="refresh-btn" onclick="refreshDashboard(this)">
+          <span class="refresh-icon" id="refresh-icon">↻</span> Actualizar
+        </button>
+      </div>
+    </div>
+
+    <!-- Lista de transacciones (se genera con JS) -->
+    <div class="tx-list" id="tx-list"></div>
+
+  </div>
+
+  <!-- ─────────────────────────────────────────
+       PANTALLA DE TRANSFERENCIA
+  ───────────────────────────────────────── -->
+  <div id="screen-transfer" class="screen" style="overflow-y:auto;">
+
+    <div class="transfer-header">
+      <button class="back-btn" onclick="goTo('dashboard')">
+        <span style="font-size:1rem;">←</span>
+      </button>
+      <div>
+        <div class="screen-title">Transferir dinero</div>
+        <div style="color:#555;font-size:0.78rem;margin-top:2px;">Saldo: <span style="color:#facc15;" id="transfer-balance-hint">$0.00</span></div>
+      </div>
+    </div>
+
+    <div class="transfer-body">
+
+      <!-- Sección 1: Datos del destinatario -->
+      <div class="form-section">
+        <div class="form-section-title">👤 Destinatario</div>
+
+        <div class="form-group">
+          <label class="form-label">DNI / Cédula</label>
+          <input id="t-dni" type="number" inputmode="numeric" class="input-field" placeholder="12345678" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Nombres completos</label>
+          <input id="t-name" type="text" class="input-field" placeholder="Ej: Juan Pérez" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Teléfono</label>
+          <input id="t-phone" type="tel" inputmode="numeric" class="input-field" placeholder="+1 555 0000" />
+        </div>
+      </div>
+
+      <!-- Sección 2: Datos del envío -->
+      <div class="form-section">
+        <div class="form-section-title">💸 Datos del envío</div>
+
+        <div class="form-group">
+          <label class="form-label">Monto a enviar</label>
+          <div class="input-wrapper">
+            <input id="t-amount" type="number" inputmode="decimal" class="input-field" placeholder="0.00" style="padding-right:50px;" min="0.01" step="0.01" oninput="updateAmountHint()" />
+            <span class="input-icon" style="color:#facc15;font-weight:700;">USD</span>
+          </div>
+          <div class="amount-hint">Disponible: <span id="amount-available">$0.00</span></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Moneda</label>
+          <select id="t-currency" class="currency-select">
+            <option value="USD">🇺🇸 USD · Dólar estadounidense</option>
+            <option value="EUR">🇪🇺 EUR · Euro</option>
+            <option value="MXN">🇲🇽 MXN · Peso mexicano</option>
+            <option value="COP">🇨🇴 COP · Peso colombiano</option>
+            <option value="ARS">🇦🇷 ARS · Peso argentino</option>
+            <option value="PEN">🇵🇪 PEN · Sol peruano</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Botón confirmar -->
+      <button class="btn-primary" onclick="handleTransfer(event)" style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:8px;">
+        <span style="font-size:1.1rem;">✈️</span>
+        <span>Confirmar transferencia</span>
+      </button>
+
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────
+       PANTALLA DE ÉXITO / PROCESANDO
+  ───────────────────────────────────────── -->
+  <div id="screen-success" class="screen">
+
+    <!-- Círculo de progreso animado -->
+    <div class="progress-circle-wrap">
+      <svg class="progress-circle" viewBox="0 0 130 130">
+        <circle class="progress-track" cx="65" cy="65" r="60"/>
+        <circle class="progress-bar"  cx="65" cy="65" r="60"/>
+      </svg>
+      <div class="progress-center">
+        <span class="progress-icon">✈️</span>
+        <span class="countdown" id="countdown-display">23:59:59</span>
+      </div>
+    </div>
+
+    <h2 class="font-display" style="font-weight:800;font-size:1.6rem;margin-bottom:8px;">¡En camino!</h2>
+    <p style="color:#888;font-size:0.9rem;line-height:1.5;margin-bottom:8px;">
+      Tu transferencia ha sido procesada exitosamente.
+    </p>
+    <div style="background:rgba(250,204,21,0.1);border:1px solid rgba(250,204,21,0.25);
+      border-radius:14px;padding:14px 20px;margin-bottom:28px;max-width:280px;">
+      <div style="color:#facc15;font-weight:700;font-size:0.85rem;">⏱ Llegará en 24 horas</div>
+      <div style="color:#555;font-size:0.78rem;margin-top:4px;">Tiempo estimado de procesamiento</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:280px;">
+      <button class="btn-primary" onclick="goToVoucher()" style="gap:8px;display:flex;align-items:center;justify-content:center;">
+        🧾 Ver comprobante
+      </button>
+      <button class="btn-secondary" onclick="goTo('dashboard')">Volver al inicio</button>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────
+       PANTALLA DE VOUCHER / COMPROBANTE
+  ───────────────────────────────────────── -->
+  <div id="screen-voucher" class="screen">
+
+    <div class="voucher-header">
+      <button class="back-btn" onclick="goTo('dashboard')">←</button>
+      <div class="screen-title">Comprobante</div>
+    </div>
+
+    <div class="voucher-body">
+
+      <!-- El ticket punteado -->
+      <div class="voucher-ticket" id="voucher-content">
+        <div class="voucher-brand">
+          <div class="logo-text" style="font-size:1.2rem;">Aura<span style="color:#fff">Bank</span></div>
+          <div class="voucher-status-badge">
+            <span>●</span> Transferencia exitosa
+          </div>
+        </div>
+
+        <div class="voucher-amount-row">
+          <div class="voucher-amount-label">Monto enviado</div>
+          <div class="voucher-amount-value" id="v-amount">$0.00</div>
+          <div style="color:#555;font-size:0.75rem;margin-top:4px;" id="v-currency">USD</div>
+        </div>
+
+        <hr class="voucher-divider"/>
+
+        <div class="voucher-row">
+          <span class="voucher-key">Destinatario</span>
+          <span class="voucher-val" id="v-name">—</span>
+        </div>
+        <div class="voucher-row">
+          <span class="voucher-key">DNI / Cédula</span>
+          <span class="voucher-val" id="v-dni">—</span>
+        </div>
+        <div class="voucher-row">
+          <span class="voucher-key">Teléfono</span>
+          <span class="voucher-val" id="v-phone">—</span>
+        </div>
+
+        <hr class="voucher-divider"/>
+
+        <div class="voucher-row">
+          <span class="voucher-key">Fecha</span>
+          <span class="voucher-val" id="v-date">—</span>
+        </div>
+        <div class="voucher-row">
+          <span class="voucher-key">Hora</span>
+          <span class="voucher-val" id="v-time">—</span>
+        </div>
+        <div class="voucher-row">
+          <span class="voucher-key">Estado</span>
+          <span class="voucher-val" style="color:#22c55e;font-weight:600;">✔ Procesado</span>
+        </div>
+
+        <div class="voucher-id" id="v-txid">ID: —</div>
+      </div>
+
+      <!-- Info de screenshot -->
+      <div style="text-align:center;margin-top:20px;color:#333;font-size:0.78rem;line-height:1.5;">
+        📸 Captura la pantalla para guardar tu comprobante
+      </div>
+
+      <!-- Botones de acción -->
+      <div style="margin-top:20px;display:flex;flex-direction:column;gap:10px;">
+        <button class="btn-primary" onclick="shareVoucher()" style="display:flex;align-items:center;justify-content:center;gap:8px;">
+          📤 Compartir comprobante
+        </button>
+        <button class="btn-secondary" onclick="goTo('dashboard')">Volver al inicio</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────
+       CONTENEDOR DE TOAST NOTIFICATIONS
+  ───────────────────────────────────────── -->
+  <div id="toast-container"></div>
+
+</div><!-- /app-shell -->
+
+<!-- ═══════════════════════════════════════════════════════════
+     JAVASCRIPT - Toda la lógica de la app
+     Organizado en secciones con comentarios didácticos
+════════════════════════════════════════════════════════════ -->
+<script>
+// ═══════════════════════════════════════════════════════════
+// 1. CONFIGURACIÓN Y CONSTANTES
+// ════════════════════════════════════════════════════════════
+
+const CREDENTIALS = { user: 'admin', pass: '1234' }; // Credenciales mockeadas
+const INITIAL_BALANCE = 100;                           // Saldo inicial de bienvenida
+
+// Claves para localStorage
+const LS_LOGGED_IN    = 'aurabank_logged';
+const LS_BALANCE      = 'aurabank_balance';
+const LS_TRANSACTIONS = 'aurabank_txs';
+const LS_FIRST_LOGIN  = 'aurabank_first';
+
+// Variable para guardar la última transferencia (para el voucher)
+let lastTransfer = null;
+// Cuenta regresiva
+let countdownInterval = null;
+
+// ═══════════════════════════════════════════════════════════
+// 2. UTILIDADES DE LOCALSTORAGE
+// ════════════════════════════════════════════════════════════
+
+/** Obtiene el saldo actual desde localStorage */
+function getBalance() {
+  return parseFloat(localStorage.getItem(LS_BALANCE) || INITIAL_BALANCE);
+}
+
+/** Guarda el saldo en localStorage */
+function setBalance(val) {
+  localStorage.setItem(LS_BALANCE, parseFloat(val).toFixed(2));
+}
+
+/** Obtiene el historial de transacciones */
+function getTransactions() {
+  try {
+    return JSON.parse(localStorage.getItem(LS_TRANSACTIONS) || '[]');
+  } catch { return []; }
+}
+
+/** Guarda una nueva transacción en el historial */
+function saveTransaction(tx) {
+  const txs = getTransactions();
+  txs.unshift(tx); // Agregar al inicio (más reciente primero)
+  localStorage.setItem(LS_TRANSACTIONS, JSON.stringify(txs));
+}
+
+// ═══════════════════════════════════════════════════════════
+// 3. NAVEGACIÓN ENTRE PANTALLAS
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Muestra una pantalla y oculta todas las demás.
+ * Cada pantalla tiene un ID con formato: screen-{nombre}
+ */
+function goTo(screenName) {
+  // Ocultar todas las pantallas
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  // Mostrar la pantalla objetivo
+  const target = document.getElementById('screen-' + screenName);
+  if (target) target.classList.add('active');
+
+  // Acciones específicas al llegar a cada pantalla
+  if (screenName === 'dashboard') {
+    updateDashboard();
+  }
+  if (screenName === 'transfer') {
+    updateTransferHints();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 4. SPLASH SCREEN (Pantalla de carga inicial)
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Al cargar la página, mostramos el splash 1.5 segundos
+ * y luego redirigimos según si hay sesión activa.
+ */
+window.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    const isLogged = localStorage.getItem(LS_LOGGED_IN) === 'true';
+    if (isLogged) {
+      goTo('dashboard'); // Sesión persistente: ir al dashboard
+    } else {
+      goTo('login');     // Sin sesión: ir al login
+    }
+  }, 1500); // 1.5 segundos de splash
+});
+
+// ═══════════════════════════════════════════════════════════
+// 5. SISTEMA DE LOGIN
+// ════════════════════════════════════════════════════════════
+
+/** Alterna visibilidad de la contraseña */
+function togglePassword() {
+  const input = document.getElementById('login-pass');
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+/**
+ * Maneja el intento de login.
+ * Valida usuario/contraseña y guarda sesión en localStorage.
+ */
+function handleLogin(event) {
+  addRipple(event);
+
+  const user = document.getElementById('login-user').value.trim();
+  const pass = document.getElementById('login-pass').value.trim();
+
+  // Validar campos vacíos
+  if (!user || !pass) {
+    showToast('error', '⚠️ Error', 'Por favor, completa todos los campos');
+    return;
+  }
+
+  // Validar credenciales
+  if (user !== CREDENTIALS.user || pass !== CREDENTIALS.pass) {
+    showToast('error', '❌ Acceso denegado', 'Usuario o contraseña incorrectos');
+    return;
+  }
+
+  // Login exitoso: guardar sesión
+  localStorage.setItem(LS_LOGGED_IN, 'true');
+
+  // Si es el primer login, dar saldo inicial
+  const isFirst = localStorage.getItem(LS_FIRST_LOGIN) !== 'done';
+  if (isFirst) {
+    setBalance(INITIAL_BALANCE);
+    localStorage.setItem(LS_FIRST_LOGIN, 'done');
+    goTo('dashboard');
+    setTimeout(() => showWelcomeModal(), 400); // Mostrar modal tras transición
+  } else {
+    goTo('dashboard');
+    showToast('success', '✅ Bienvenido', 'Sesión iniciada correctamente');
+  }
+}
+
+/** Cierra sesión y borra datos de sesión */
+function handleLogout() {
+  localStorage.removeItem(LS_LOGGED_IN);
+  showToast('info', '👋 Hasta luego', 'Cerrando sesión...');
+  setTimeout(() => goTo('login'), 1000);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 6. MODAL DE BIENVENIDA
+// ════════════════════════════════════════════════════════════
+
+function showWelcomeModal() {
+  const modal = document.getElementById('modal-welcome');
+  modal.classList.add('show');
+}
+
+function closeWelcome() {
+  const modal = document.getElementById('modal-welcome');
+  modal.classList.remove('show');
+  showToast('success', '🎉 ¡Listo!', '$100.00 USD agregados a tu cuenta');
+}
+
+// ═══════════════════════════════════════════════════════════
+// 7. DASHBOARD - Actualización de datos
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Actualiza todos los datos del dashboard:
+ * - Saldo con animación count-up
+ * - Saludo según la hora
+ * - Lista de transacciones
+ */
+function updateDashboard() {
+  const balance = getBalance();
+
+  // Animación count-up del saldo
+  const balanceEl = document.getElementById('balance-display');
+  animateCountUp(balanceEl, 0, balance, 800);
+
+  // Saludo personalizado según hora del día
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? 'Buenos días 👋' : hour < 18 ? 'Buenas tardes 👋' : 'Buenas noches 👋';
+  document.getElementById('dash-greeting').textContent = greet;
+
+  // Renderizar lista de transacciones
+  renderTransactions();
+
+  // Badge de notificaciones (si hay txs)
+  const txs = getTransactions();
+  const badge = document.getElementById('notif-badge');
+  badge.style.display = txs.length > 0 ? 'block' : 'none';
+}
+
+/**
+ * Anima un número del valor 'from' al valor 'to'
+ * en 'duration' milisegundos (efecto count-up).
+ */
+function animateCountUp(el, from, to, duration) {
+  const start = performance.now();
+  el.classList.remove('balance-animate');
+  void el.offsetWidth; // Fuerza reflow para reiniciar animación
+  el.classList.add('balance-animate');
+
+  function update(timestamp) {
+    const progress = Math.min((timestamp - start) / duration, 1);
+    // Easing easeOutCubic para movimiento natural
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const current = from + (to - from) * eased;
+    el.textContent = current.toFixed(2);
+    if (progress < 1) requestAnimationFrame(update);
+  }
+  requestAnimationFrame(update);
+}
+
+/**
+ * Renderiza la lista de transacciones recientes.
+ * Si no hay, muestra un estado vacío.
+ */
+function renderTransactions() {
+  const txs = getTransactions();
+  const container = document.getElementById('tx-list');
+
+  if (txs.length === 0) {
+    container.innerHTML = `
+      <div class="tx-empty">
+        <div class="tx-empty-icon">📭</div>
+        <div>Aún no has realizado transferencias</div>
+        <div style="color:#555;font-size:0.78rem;margin-top:4px;">¡Haz tu primera transferencia!</div>
+      </div>
+    `;
+    return;
+  }
+
+  // Generar HTML por cada transacción (máximo 20 recientes)
+  container.innerHTML = txs.slice(0, 20).map(tx => {
+    const initials = tx.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+    return `
+      <div class="tx-item" onclick="showToast('info','🧾 TX-${tx.id.slice(-6)}','${tx.name} · ${tx.currency} ${parseFloat(tx.amount).toFixed(2)}')">
+        <div class="tx-avatar">${initials}</div>
+        <div class="tx-info">
+          <div class="tx-name">${tx.name}</div>
+          <div class="tx-date">${tx.date} · ${tx.time}</div>
+        </div>
+        <div style="text-align:right;">
+          <div class="tx-amount">-$${parseFloat(tx.amount).toFixed(2)}</div>
+          <div class="tx-status">✔ ${tx.currency}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/** Actualiza saldos en la pantalla de transferencia */
+function updateTransferHints() {
+  const balance = getBalance();
+  document.getElementById('transfer-balance-hint').textContent = '$' + balance.toFixed(2);
+  document.getElementById('amount-available').textContent = '$' + balance.toFixed(2);
+}
+
+/** Actualiza el hint de disponible al escribir el monto */
+function updateAmountHint() {
+  const balance = getBalance();
+  const amount  = parseFloat(document.getElementById('t-amount').value) || 0;
+  const remaining = balance - amount;
+  const el = document.getElementById('amount-available');
+  el.textContent = '$' + Math.max(0, remaining).toFixed(2);
+  el.style.color  = remaining < 0 ? '#ef4444' : '#facc15';
+}
+
+/** Simulación de refresh (pull-to-refresh) */
+function refreshDashboard(btn) {
+  const icon = document.getElementById('refresh-icon');
+  icon.classList.add('spinning');
+  setTimeout(() => {
+    icon.classList.remove('spinning');
+    updateDashboard();
+    showToast('success', '✅ Actualizado', 'Información al día');
+  }, 800);
+}
+
+/** Navega a la pantalla de transferencia */
+function goToTransfer(event) {
+  if (event) addRipple(event);
+  goTo('transfer');
+}
+
+/** Muestra notificaciones en un toast */
+function showNotifications() {
+  const txs = getTransactions();
+  if (txs.length === 0) {
+    showToast('info', '🔔 Notificaciones', 'No tienes notificaciones nuevas');
+  } else {
+    showToast('info', '🔔 Actividad reciente', `Tienes ${txs.length} transferencia${txs.length !== 1 ? 's' : ''} registrada${txs.length !== 1 ? 's' : ''}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 8. FLUJO DE TRANSFERENCIA
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Procesa la transferencia:
+ * 1. Valida todos los campos
+ * 2. Verifica saldo suficiente
+ * 3. Descuenta el saldo
+ * 4. Guarda la transacción
+ * 5. Navega a pantalla de éxito
+ */
+function handleTransfer(event) {
+  addRipple(event);
+
+  // Recoger valores del formulario
+  const dni      = document.getElementById('t-dni').value.trim();
+  const name     = document.getElementById('t-name').value.trim();
+  const phone    = document.getElementById('t-phone').value.trim();
+  const amount   = parseFloat(document.getElementById('t-amount').value);
+  const currency = document.getElementById('t-currency').value;
+
+  // --- Validaciones ---
+  if (!dni || !name || !phone) {
+    showToast('error', '⚠️ Faltan datos', 'Completa todos los datos del destinatario');
+    return;
+  }
+  if (!amount || amount <= 0) {
+    showToast('error', '⚠️ Monto inválido', 'El monto debe ser mayor a 0');
+    return;
+  }
+
+  const balance = getBalance();
+  if (amount > balance) {
+    showToast('error', '❌ Saldo insuficiente', `Tu saldo disponible es $${balance.toFixed(2)}`);
+    return;
+  }
+
+  // --- Todo válido: procesar ---
+
+  // Generar ID único para la transacción
+  const txId = 'TX-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6).toUpperCase();
+
+  // Fecha y hora actual
+  const now  = new Date();
+  const date = now.toLocaleDateString('es-EC', { day: '2-digit', month: 'short', year: 'numeric' });
+  const time = now.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' });
+
+  // Guardar datos de la transferencia
+  lastTransfer = { id: txId, name, dni, phone, amount, currency, date, time };
+
+  // Descontar saldo y guardar transacción
+  setBalance(balance - amount);
+  saveTransaction(lastTransfer);
+
+  // Limpiar formulario
+  ['t-dni', 't-name', 't-phone', 't-amount'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+
+  // Navegar a pantalla de éxito
+  goTo('success');
+  showToast('success', '✅ ¡Enviado!', `$${amount.toFixed(2)} ${currency} en camino a ${name}`);
+  startCountdown();
+}
+
+// ═══════════════════════════════════════════════════════════
+// 9. PANTALLA DE ÉXITO + CUENTA REGRESIVA
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Inicia el contador regresivo de 24 horas en la pantalla de éxito.
+ * Es visual/estático: muestra 23:59:59 y cuenta hacia abajo.
+ */
+function startCountdown() {
+  // Limpiar intervalo previo si existe
+  if (countdownInterval) clearInterval(countdownInterval);
+
+  let totalSeconds = 23 * 3600 + 59 * 60 + 59;
+  const el = document.getElementById('countdown-display');
+
+  countdownInterval = setInterval(() => {
+    if (totalSeconds <= 0) {
+      clearInterval(countdownInterval);
+      el.textContent = '00:00:00';
+      return;
+    }
+    totalSeconds--;
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    el.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }, 1000);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 10. VOUCHER / COMPROBANTE
+// ════════════════════════════════════════════════════════════
+
+/** Navega al voucher y lo rellena con los datos de la última transferencia */
+function goToVoucher() {
+  if (!lastTransfer) {
+    showToast('error', '⚠️', 'No hay transferencia reciente');
+    return;
+  }
+
+  const t = lastTransfer;
+
+  // Rellenar datos en el voucher
+  document.getElementById('v-amount').textContent   = '$' + parseFloat(t.amount).toFixed(2);
+  document.getElementById('v-currency').textContent = t.currency;
+  document.getElementById('v-name').textContent     = t.name;
+  document.getElementById('v-dni').textContent      = t.dni;
+  document.getElementById('v-phone').textContent    = t.phone;
+  document.getElementById('v-date').textContent     = t.date;
+  document.getElementById('v-time').textContent     = t.time;
+  document.getElementById('v-txid').textContent     = t.id;
+
+  goTo('voucher');
+}
+
+/** Simula compartir el comprobante */
+function shareVoucher() {
+  if (navigator.share) {
+    navigator.share({
+      title: 'Comprobante AuraBank',
+      text: `Transferencia de $${lastTransfer?.amount.toFixed(2)} ${lastTransfer?.currency} a ${lastTransfer?.name}\nID: ${lastTransfer?.id}`,
+    }).catch(() => {});
+  } else {
+    showToast('info', '📤 Compartir', 'Captura la pantalla para compartir tu comprobante');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 11. SISTEMA DE TOAST NOTIFICATIONS
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Muestra una notificación flotante (toast).
+ * @param {string} type    - 'success' | 'error' | 'info' | 'warning'
+ * @param {string} title   - Título del toast
+ * @param {string} message - Mensaje descriptivo
+ */
+function showToast(type, title, message) {
+  const container = document.getElementById('toast-container');
+
+  // Íconos según el tipo
+  const icons = {
+    success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️'
+  };
+
+  // Crear el elemento toast
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `
+    <div class="toast-icon">${icons[type] || 'ℹ️'}</div>
+    <div class="toast-body">
+      <div class="toast-title">${title}</div>
+      <div class="toast-msg">${message}</div>
+    </div>
+    <div class="toast-progress"></div>
+  `;
+
+  container.appendChild(toast);
+
+  // Animar entrada (frame siguiente para que la transición aplique)
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      toast.classList.add('show');
+    });
+  });
+
+  // Auto-eliminar después de 3.5 segundos
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 400);
+  }, 3500);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 12. EFECTO RIPPLE EN BOTONES
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Crea un efecto de onda (ripple) al presionar un botón.
+ * @param {Event} event - El evento click/touch
+ */
+function addRipple(event) {
+  const btn = event.currentTarget || event.target.closest('.btn-primary');
+  if (!btn) return;
+
+  const rect = btn.getBoundingClientRect();
+  const size = Math.max(rect.width, rect.height);
+  const x    = (event.clientX || rect.left + rect.width/2) - rect.left - size/2;
+  const y    = (event.clientY || rect.top  + rect.height/2) - rect.top  - size/2;
+
+  const ripple = document.createElement('span');
+  ripple.className = 'ripple';
+  ripple.style.cssText = `width:${size}px;height:${size}px;left:${x}px;top:${y}px;`;
+
+  btn.appendChild(ripple);
+  ripple.addEventListener('animationend', () => ripple.remove());
+}
+
+// Agregar ripple a todos los botones primarios
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.btn-primary');
+  if (btn) addRipple({ currentTarget: btn, clientX: e.clientX, clientY: e.clientY });
+});
+
+// ═══════════════════════════════════════════════════════════
+// FIN DE LA LÓGICA DE LA APP ✦
+// ════════════════════════════════════════════════════════════
+</script>
+</body>
+</html>
