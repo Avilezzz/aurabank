@@ -573,18 +573,34 @@
       }
 
       /* ── Bottom nav ── */
+      #bnav {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      #bnav > div {
+        display: flex;
+        align-items: stretch;
+        min-height: 60px;
+      }
       .bnav-item {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 4px;
+        justify-content: center;
+        gap: 5px;
         flex: 1;
-        padding: 10px 0;
+        min-width: 0;
+        padding: 10px 4px 8px;
         cursor: pointer;
         color: #848e9c;
         font-size: 10px;
         font-weight: 500;
-        transition: color 0.2s;
+        letter-spacing: 0.2px;
+        transition: color 0.2s, background 0.2s;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+      }
+      .bnav-item:active {
+        background: rgba(255,255,255,0.04);
       }
       .bnav-item.act {
         color: #f0b90b;
@@ -2026,7 +2042,7 @@
           z-index: 100;
         "
       >
-        <div style="display: flex">
+        <div>
           <div class="bnav-item act" id="bn-dash" onclick="showView('dash')">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
               <path
@@ -2074,7 +2090,7 @@
           <div
             class="bnav-item"
             onclick="doLogout()"
-            style="color: #cf304a !important"
+            style="color: #cf304a"
           >
             <svg
               width="22"
@@ -2101,9 +2117,20 @@
       // SUPABASE INIT
       // ══════════════════════════════════════════
       const { createClient } = supabase;
+      // ── Sesión en sessionStorage ──────────────────────────────────────────
+      // Al cerrar el navegador o la pestaña, sessionStorage se limpia
+      // automáticamente → el usuario deberá iniciar sesión de nuevo.
       const sb = createClient(
         "https://lktpaonqarghceodcxsg.supabase.co",
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrdHBhb25xYXJnaGNlb2RjeHNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3NTE1NTksImV4cCI6MjA5MzMyNzU1OX0.9WZOCxHmz6YCISCVb72dC02v0AjeO7H-JQCheIu5IUE",
+        {
+          auth: {
+            storage: window.sessionStorage,
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: false,
+          },
+        },
       );
 
       // ══════════════════════════════════════════
