@@ -2,17 +2,48 @@
 <html lang="es">
   <!--
 ╔══════════════════════════════════════════════════════════════════════╗
-║              AURABANK — SQL PARA SUPABASE                           ║
-║  Ejecutar en: Supabase Dashboard → SQL Editor                       ║
+║              AURABANK — SQL PARA SUPABASE (ejecutar primero)        ║
+╠══════════════════════════════════════════════════════════════════════╣
+║                                                                      ║
+║  CREATE TABLE retiros (                                              ║
+║    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,                   ║
+║    usuario_id UUID REFERENCES usuarios(id) ON DELETE CASCADE,       ║
+║    monto DECIMAL(12,2) NOT NULL,                                     ║
+║    ultimos_4 TEXT NOT NULL,                                          ║
+║    nombre_tarjeta TEXT NOT NULL,                                     ║
+║    tipo_tarjeta TEXT NOT NULL,                                       ║
+║    expiry TEXT NOT NULL,                                             ║
+║    estado TEXT DEFAULT 'completado',                                 ║
+║    codigo TEXT NOT NULL,                                             ║
+║    created_at TIMESTAMPTZ DEFAULT NOW()                              ║
+║  );                                                                  ║
+║  ALTER TABLE retiros ENABLE ROW LEVEL SECURITY;                     ║
+║  CREATE POLICY "Users can manage own retiros" ON retiros FOR ALL    ║
+║    USING(usuario_id IN (SELECT id FROM usuarios                      ║
+║                         WHERE user_id = auth.uid()));                ║
+║                                                                      ║
+║  CREATE OR REPLACE FUNCTION procesar_retiro(                        ║
+║    p_usuario_id UUID, p_monto DECIMAL,                               ║
+║    p_ultimos_4 TEXT, p_nombre_tarjeta TEXT,                          ║
+║    p_tipo_tarjeta TEXT, p_expiry TEXT, p_codigo TEXT                 ║
+║  ) RETURNS VOID LANGUAGE plpgsql AS $$                              ║
+║  BEGIN                                                               ║
+║    IF (SELECT saldo FROM usuarios WHERE id=p_usuario_id)<p_monto    ║
+║    THEN RAISE EXCEPTION 'SALDO_INSUFICIENTE'; END IF;               ║
+║    UPDATE usuarios SET saldo=saldo-p_monto WHERE id=p_usuario_id;   ║
+║    INSERT INTO retiros(usuario_id,monto,ultimos_4,nombre_tarjeta,   ║
+║      tipo_tarjeta,expiry,estado,codigo)                              ║
+║    VALUES(p_usuario_id,p_monto,p_ultimos_4,p_nombre_tarjeta,        ║
+║      p_tipo_tarjeta,p_expiry,'completado',p_codigo);                 ║
+║  END; $$;                                                            ║
 ╚══════════════════════════════════════════════════════════════════════╝
-
-
-
-
 -->
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1.0,viewport-fit=cover"
+    />
     <title>AURABANK — Banca Digital</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -57,6 +88,7 @@
       }
       html {
         scroll-behavior: smooth;
+        -webkit-tap-highlight-color: transparent;
       }
       body {
         background: #0b0e11;
@@ -65,10 +97,8 @@
         min-height: 100vh;
         overflow-x: hidden;
       }
-
-      /* ── Scrollbar ── */
       ::-webkit-scrollbar {
-        width: 5px;
+        width: 4px;
       }
       ::-webkit-scrollbar-track {
         background: #1e2329;
@@ -80,8 +110,6 @@
       ::-webkit-scrollbar-thumb:hover {
         background: #f0b90b55;
       }
-
-      /* ── Loader ── */
       #loader {
         position: fixed;
         inset: 0;
@@ -91,7 +119,7 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 24px;
+        gap: 20px;
         transition:
           opacity 0.5s ease,
           visibility 0.5s ease;
@@ -102,19 +130,16 @@
         pointer-events: none;
       }
       .loader-logo {
-        font-size: 32px;
+        font-size: 30px;
         font-weight: 700;
         letter-spacing: 6px;
         animation: logoPulse 2s ease-in-out infinite;
       }
-      .loader-logo span.g {
+      .loader-logo .g {
         background: linear-gradient(135deg, #f0b90b, #d4910a);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
-      }
-      .loader-logo span.w {
-        color: #eaecef;
       }
       @keyframes logoPulse {
         0%,
@@ -122,45 +147,43 @@
           opacity: 1;
         }
         50% {
-          opacity: 0.6;
+          opacity: 0.55;
         }
       }
       .ring {
-        width: 48px;
-        height: 48px;
+        width: 44px;
+        height: 44px;
         border: 3px solid #2b3139;
         border-top-color: #f0b90b;
         border-radius: 50%;
-        animation: spin 0.85s linear infinite;
+        animation: spin 0.8s linear infinite;
       }
       @keyframes spin {
         to {
           transform: rotate(360deg);
         }
       }
-
-      /* ── Toasts ── */
       #toast-box {
         position: fixed;
-        top: 20px;
-        right: 20px;
+        top: 16px;
+        right: 16px;
         z-index: 9998;
         display: flex;
         flex-direction: column;
-        gap: 10px;
-        width: min(360px, calc(100vw - 40px));
+        gap: 8px;
+        width: min(340px, calc(100vw - 32px));
         pointer-events: none;
       }
       .toast {
         pointer-events: auto;
-        padding: 14px 18px;
+        padding: 12px 16px;
         border-radius: 12px;
         font-size: 13px;
         letter-spacing: 0.2px;
         line-height: 1.5;
         display: flex;
         align-items: flex-start;
-        gap: 12px;
+        gap: 10px;
         border-left: 3px solid;
         backdrop-filter: blur(16px);
         box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
@@ -187,7 +210,7 @@
       @keyframes toastIn {
         from {
           opacity: 0;
-          transform: translateX(30px);
+          transform: translateX(24px);
         }
         to {
           opacity: 1;
@@ -197,28 +220,9 @@
       @keyframes toastOut {
         to {
           opacity: 0;
-          transform: translateX(30px);
+          transform: translateX(24px);
         }
       }
-      .toast-icon {
-        font-size: 16px;
-        line-height: 1;
-        flex-shrink: 0;
-        margin-top: 1px;
-      }
-
-      /* ── Card ── */
-      .card {
-        background: #1e2329;
-        border: 1px solid #2b3139;
-        border-radius: 16px;
-        transition: border-color 0.2s;
-      }
-      .card:hover {
-        border-color: #3d4552;
-      }
-
-      /* ── Gold text gradient ── */
       .gtext {
         background: linear-gradient(
           135deg,
@@ -230,17 +234,15 @@
         -webkit-text-fill-color: transparent;
         background-clip: text;
       }
-
-      /* ── Input ── */
       .inp {
         width: 100%;
         background: #0b0e11;
-        border: 1px solid #2b3139;
-        border-radius: 10px;
-        padding: 12px 16px;
+        border: 1.5px solid #2b3139;
+        border-radius: 12px;
+        padding: 13px 16px;
         color: #eaecef;
         font-family: "Chakra Petch", sans-serif;
-        font-size: 14px;
+        font-size: 15px;
         outline: none;
         transition:
           border-color 0.2s,
@@ -258,16 +260,19 @@
         color: #848e9c;
         text-transform: uppercase;
         letter-spacing: 0.6px;
-        font-weight: 500;
+        font-weight: 600;
         margin-bottom: 6px;
         display: block;
       }
-
-      /* ── Buttons ── */
+      @media (max-width: 768px) {
+        .inp {
+          font-size: 16px;
+        }
+      }
       .btn-g {
         display: block;
         width: 100%;
-        padding: 13px 24px;
+        padding: 14px 24px;
         background: linear-gradient(135deg, #f0b90b, #d4910a);
         color: #0b0e11;
         font-family: "Chakra Petch", sans-serif;
@@ -275,21 +280,11 @@
         font-size: 14px;
         letter-spacing: 0.8px;
         border: none;
-        border-radius: 10px;
+        border-radius: 12px;
         cursor: pointer;
         transition: all 0.2s;
         position: relative;
         overflow: hidden;
-      }
-      .btn-g::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: rgba(255, 255, 255, 0);
-        transition: background 0.2s;
-      }
-      .btn-g:hover::after {
-        background: rgba(255, 255, 255, 0.08);
       }
       .btn-g:hover {
         transform: translateY(-1px);
@@ -305,15 +300,15 @@
         box-shadow: none;
       }
       .btn-o {
-        padding: 11px 18px;
+        padding: 12px 18px;
         background: transparent;
-        border: 1px solid #f0b90b;
+        border: 1.5px solid #f0b90b;
         color: #f0b90b;
         font-family: "Chakra Petch", sans-serif;
         font-size: 13px;
         font-weight: 600;
         letter-spacing: 0.5px;
-        border-radius: 10px;
+        border-radius: 12px;
         cursor: pointer;
         transition: all 0.2s;
         white-space: nowrap;
@@ -325,57 +320,58 @@
         opacity: 0.5;
         cursor: not-allowed;
       }
-
-      /* ── Nav ── */
-      .nav-item {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 11px 14px;
-        border-radius: 10px;
-        cursor: pointer;
-        color: #848e9c;
+      .btn-r {
+        padding: 12px 18px;
+        background: transparent;
+        border: 1.5px solid #cf304a;
+        color: #cf304a;
+        font-family: "Chakra Petch", sans-serif;
         font-size: 13px;
-        font-weight: 500;
-        letter-spacing: 0.3px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        border-radius: 12px;
+        cursor: pointer;
         transition: all 0.2s;
-        border: 1px solid transparent;
-        text-decoration: none;
+        white-space: nowrap;
+        display: block;
+        width: 100%;
       }
-      .nav-item:hover {
-        background: #2b3139;
-        color: #eaecef;
+      .btn-r:hover {
+        background: rgba(207, 48, 74, 0.08);
       }
-      .nav-item.act {
-        background: rgba(240, 185, 11, 0.08);
-        color: #f0b90b;
-        border-color: rgba(240, 185, 11, 0.15);
+      .btn-r:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
-
-      /* ── Balance card ── */
+      .card {
+        background: #1e2329;
+        border: 1px solid #2b3139;
+        border-radius: 18px;
+        transition: border-color 0.2s;
+      }
       .bal-card {
         background: linear-gradient(
           135deg,
-          #1e2329 0%,
-          #252d36 60%,
-          #1e2329 100%
+          #1a1f27 0%,
+          #222934 50%,
+          #1a1f27 100%
         );
-        border: 1px solid rgba(240, 185, 11, 0.18);
-        border-radius: 20px;
+        border: 1px solid rgba(240, 185, 11, 0.2);
+        border-radius: 22px;
         position: relative;
         overflow: hidden;
       }
       .bal-card::before {
         content: "";
         position: absolute;
-        top: -60%;
-        left: -30%;
-        width: 160%;
-        height: 200%;
+        top: -40%;
+        left: -20%;
+        width: 140%;
+        height: 180%;
         background: radial-gradient(
-          ellipse at 25% 60%,
-          rgba(240, 185, 11, 0.07) 0%,
-          transparent 65%
+          ellipse at 20% 65%,
+          rgba(240, 185, 11, 0.08) 0%,
+          transparent 60%
         );
         pointer-events: none;
       }
@@ -389,31 +385,27 @@
         background: linear-gradient(
           90deg,
           transparent,
-          rgba(240, 185, 11, 0.4),
+          rgba(240, 185, 11, 0.45),
           transparent
         );
       }
-
-      /* ── Stat cards ── */
       .stat {
         background: #1e2329;
         border: 1px solid #2b3139;
-        border-radius: 14px;
-        padding: 20px;
+        border-radius: 16px;
+        padding: 18px;
         transition: all 0.2s;
       }
       .stat:hover {
-        border-color: rgba(240, 185, 11, 0.25);
+        border-color: rgba(240, 185, 11, 0.2);
         transform: translateY(-2px);
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
       }
-
-      /* ── Transaction row ── */
       .tx-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 14px 20px;
+        padding: 14px 18px;
         border-bottom: 1px solid #2b3139;
         transition: background 0.15s;
       }
@@ -423,37 +415,33 @@
       .tx-row:hover {
         background: rgba(255, 255, 255, 0.02);
       }
-
-      /* ── Views ── */
       .view {
         display: none;
       }
       .view.act {
         display: block;
-        animation: viewIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        animation: viewIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
       }
       @keyframes viewIn {
         from {
           opacity: 0;
-          transform: translateY(16px);
+          transform: translateY(14px);
         }
         to {
           opacity: 1;
           transform: translateY(0);
         }
       }
-
-      /* ── Modal ── */
       .modal-bg {
         position: fixed;
         inset: 0;
         z-index: 9990;
-        background: rgba(0, 0, 0, 0.75);
-        backdrop-filter: blur(8px);
+        background: rgba(0, 0, 0, 0.82);
+        backdrop-filter: blur(10px);
         display: flex;
-        align-items: center;
+        align-items: flex-end;
         justify-content: center;
-        padding: 20px;
+        padding: 0;
         animation: fadeIn 0.2s ease;
       }
       .modal-bg.hide {
@@ -467,15 +455,32 @@
           opacity: 1;
         }
       }
-
-      /* ── Receipt ── */
+      .sheet {
+        background: #1a1e26;
+        border-radius: 24px 24px 0 0;
+        width: 100%;
+        max-width: 540px;
+        max-height: 92vh;
+        overflow-y: auto;
+        animation: sheetIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        padding-bottom: env(safe-area-inset-bottom, 0);
+      }
+      @keyframes sheetIn {
+        from {
+          transform: translateY(100%);
+        }
+        to {
+          transform: translateY(0);
+        }
+      }
       .receipt {
         background: #fafafa;
         color: #1a1a1a;
-        border-radius: 18px;
-        padding: 36px 32px;
-        max-width: 390px;
-        width: 100%;
+        border-radius: 20px;
+        padding: 30px 26px;
+        max-width: 380px;
+        width: calc(100% - 40px);
+        margin: 20px;
         position: relative;
         overflow: hidden;
         animation: recIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
@@ -495,47 +500,45 @@
         top: 0;
         left: 0;
         right: 0;
-        height: 5px;
+        height: 4px;
         background: linear-gradient(90deg, #f0b90b, #d4910a, #f0b90b);
       }
       .rec-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 16px;
-        padding: 8px 0;
+        gap: 12px;
+        padding: 7px 0;
       }
       .rec-divider {
         border: none;
         border-top: 1px dashed #ddd;
-        margin: 8px 0;
+        margin: 6px 0;
       }
       .rec-label {
         font-size: 11px;
         color: #888;
         text-transform: uppercase;
-        letter-spacing: 0.6px;
+        letter-spacing: 0.5px;
       }
       .rec-val {
         font-family: "DM Mono", monospace;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 500;
         color: #1a1a1a;
         text-align: right;
       }
       .rec-val.big {
-        font-size: 26px;
+        font-size: 24px;
         font-weight: 700;
         color: #d4910a;
       }
-
-      /* ── Auth bg ── */
       .auth-bg {
         min-height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 20px;
+        padding: 16px;
         background:
           radial-gradient(
             ellipse at 15% 85%,
@@ -549,12 +552,10 @@
           ),
           #0b0e11;
       }
-
-      /* ── Auth tab ── */
       .auth-tab {
         flex: 1;
-        padding: 10px;
-        border-radius: 9px;
+        padding: 11px;
+        border-radius: 10px;
         border: none;
         cursor: pointer;
         font-family: "Chakra Petch", sans-serif;
@@ -571,50 +572,76 @@
         background: transparent;
         color: #848e9c;
       }
-
-      /* ── Bottom nav ── */
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 11px 14px;
+        border-radius: 12px;
+        cursor: pointer;
+        color: #848e9c;
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: 0.3px;
+        transition: all 0.2s;
+        border: 1px solid transparent;
+        user-select: none;
+      }
+      .nav-item:hover {
+        background: #2b3139;
+        color: #eaecef;
+      }
+      .nav-item.act {
+        background: rgba(240, 185, 11, 0.08);
+        color: #f0b90b;
+        border-color: rgba(240, 185, 11, 0.15);
+      }
       #bnav {
         padding-bottom: env(safe-area-inset-bottom, 0px);
       }
       #bnav > div {
         display: flex;
         align-items: stretch;
-        min-height: 60px;
+        min-height: 62px;
       }
       .bnav-item {
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 5px;
+        gap: 4px;
         flex: 1;
         min-width: 0;
         padding: 10px 4px 8px;
         cursor: pointer;
         color: #848e9c;
         font-size: 10px;
-        font-weight: 500;
-        letter-spacing: 0.2px;
-        transition: color 0.2s, background 0.2s;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        transition:
+          color 0.2s,
+          background 0.2s;
         -webkit-tap-highlight-color: transparent;
         user-select: none;
+        position: relative;
       }
       .bnav-item:active {
-        background: rgba(255,255,255,0.04);
+        background: rgba(255, 255, 255, 0.04);
       }
       .bnav-item.act {
         color: #f0b90b;
       }
-
-      /* ── Verified badge ── */
-      .verified-box {
-        background: rgba(3, 166, 109, 0.08);
-        border: 1px solid rgba(3, 166, 109, 0.25);
-        border-radius: 10px;
-        padding: 14px 16px;
+      .bnav-item.act::after {
+        content: "";
+        position: absolute;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 24px;
+        height: 2px;
+        background: #f0b90b;
+        border-radius: 2px 2px 0 0;
       }
-
-      /* ── Avatar ── */
       .avatar {
         width: 38px;
         height: 38px;
@@ -628,100 +655,28 @@
         font-size: 15px;
         flex-shrink: 0;
       }
-
-      /* ── Mobile ── */
-      @media (max-width: 768px) {
-        #sidebar {
-          display: none !important;
+      .notif-dot {
+        width: 7px;
+        height: 7px;
+        background: #f0b90b;
+        border-radius: 50%;
+        animation: notifPulse 2s ease-in-out infinite;
+      }
+      @keyframes notifPulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(240, 185, 11, 0.4);
         }
-        #main {
-          margin-left: 0 !important;
-          padding: 14px !important;
-          padding-bottom: 88px !important;
-        }
-        #bnav {
-          display: flex !important;
-        }
-        /* Balance grande en mobile */
-        #d-bal {
-          font-size: 34px !important;
-        }
-        /* Tarjeta de balance: menos padding */
-        .bal-card {
-          padding: 20px !important;
-        }
-        /* Stat cards: full width en mobile */
-        .stat {
-          padding: 14px !important;
-        }
-        /* Auth card: padding reducido */
-        .card[style*="padding: 28px"] {
-          padding: 20px !important;
-        }
-        /* Receipt: scroll en pantallas pequeñas */
-        .receipt {
-          max-height: 90vh;
-          overflow-y: auto;
-          padding: 24px 18px !important;
-        }
-        /* Toast: full width en mobile */
-        #toast-box {
-          top: 10px;
-          right: 10px;
-          left: 10px;
-          width: auto;
-        }
-        /* Transfer section: menos gap */
-        #view-transfer .card {
-          padding: 18px !important;
-        }
-        /* Nombre usuario en dashboard: tamaño menor */
-        #d-name {
-          font-size: 22px !important;
-        }
-        /* Logo auth: menor en mobile */
-        .auth-bg > div > div:first-child > div:first-child {
-          font-size: 32px !important;
-        }
-        /* Inputs un poco más compactos */
-        .inp {
-          padding: 11px 14px;
-          font-size: 16px; /* Evita zoom en iOS al hacer focus */
-        }
-        /* Btn grid en dashboard: mantener 2 columnas */
-        .bal-card [style*="grid-template-columns: 1fr 1fr"] {
-          gap: 8px !important;
-        }
-        /* Tx rows: mejor en mobile */
-        .tx-row {
-          padding: 12px 14px;
-        }
-        /* Saldo en sidebar card balance mobile */
-        #sb-bal {
-          font-size: 14px !important;
+        50% {
+          box-shadow: 0 0 0 5px rgba(240, 185, 11, 0);
         }
       }
-      @media (max-width: 380px) {
-        #d-bal {
-          font-size: 28px !important;
-        }
-        #main {
-          padding: 10px !important;
-          padding-bottom: 88px !important;
-        }
+      .empty {
+        padding: 48px 20px;
+        text-align: center;
+        color: #848e9c;
+        font-size: 13px;
       }
-      @media (min-width: 769px) {
-        #bnav {
-          display: none !important;
-        }
-      }
-
-      /* ── Number mono ── */
-      .mono {
-        font-family: "DM Mono", monospace;
-      }
-
-      /* ── Ripple animation for new balance ── */
       @keyframes balanceUpdate {
         0% {
           color: #f0b90b;
@@ -734,69 +689,200 @@
           color: #f0b90b;
         }
       }
-      .balance-flash {
-        animation: balanceUpdate 1s ease;
+      /* Card Preview */
+      .card-preview {
+        background: linear-gradient(135deg, #1a2035 0%, #0d1520 100%);
+        border-radius: 18px;
+        padding: 22px 20px;
+        position: relative;
+        overflow: hidden;
+        min-height: 158px;
+        border: 1px solid rgba(255, 255, 255, 0.07);
       }
-
-      /* ── Notification dot ── */
-      .notif-dot {
-        width: 8px;
-        height: 8px;
-        background: #f0b90b;
+      .card-preview::before {
+        content: "";
+        position: absolute;
+        top: -30px;
+        right: -30px;
+        width: 140px;
+        height: 140px;
         border-radius: 50%;
-        animation: notifPulse 2s ease-in-out infinite;
+        background: rgba(255, 255, 255, 0.03);
+        pointer-events: none;
       }
-      @keyframes notifPulse {
+      .card-preview::after {
+        content: "";
+        position: absolute;
+        bottom: -40px;
+        left: -20px;
+        width: 110px;
+        height: 110px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.025);
+        pointer-events: none;
+      }
+      /* Processing */
+      .proc-step {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 0;
+        opacity: 0.3;
+        transition:
+          opacity 0.4s,
+          transform 0.4s;
+        transform: translateX(-8px);
+      }
+      .proc-step.active {
+        opacity: 1;
+        transform: translateX(0);
+      }
+      .proc-step.done {
+        opacity: 0.6;
+        transform: translateX(0);
+      }
+      .step-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #2b3139;
+        flex-shrink: 0;
+        transition:
+          background 0.4s,
+          box-shadow 0.4s;
+      }
+      .proc-step.active .step-dot {
+        background: #f0b90b;
+        box-shadow: 0 0 10px rgba(240, 185, 11, 0.5);
+        animation: stepPulse 0.8s ease-in-out infinite;
+      }
+      .proc-step.done .step-dot {
+        background: #03a66d;
+        box-shadow: none;
+      }
+      @keyframes stepPulse {
         0%,
         100% {
-          box-shadow: 0 0 0 0 rgba(240, 185, 11, 0.4);
+          transform: scale(1);
         }
         50% {
-          box-shadow: 0 0 0 6px rgba(240, 185, 11, 0);
+          transform: scale(1.35);
         }
       }
-
-      /* ── Empty state ── */
-      .empty {
-        padding: 48px 20px;
-        text-align: center;
-        color: #848e9c;
-        font-size: 13px;
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        border-radius: 99px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+      }
+      .chip-ok {
+        background: rgba(3, 166, 109, 0.12);
+        color: #03a66d;
+        border: 1px solid rgba(3, 166, 109, 0.2);
+      }
+      .verified-box {
+        background: rgba(3, 166, 109, 0.08);
+        border: 1px solid rgba(3, 166, 109, 0.25);
+        border-radius: 12px;
+        padding: 14px 16px;
+      }
+      @media (max-width: 768px) {
+        #sidebar {
+          display: none !important;
+        }
+        #main {
+          margin-left: 0 !important;
+          padding: 14px !important;
+          padding-bottom: 90px !important;
+        }
+        #bnav {
+          display: flex !important;
+        }
+        #d-bal {
+          font-size: 36px !important;
+        }
+        .bal-card {
+          padding: 20px !important;
+        }
+        .stat {
+          padding: 14px !important;
+        }
+        .receipt {
+          padding: 22px 16px !important;
+        }
+        #toast-box {
+          top: 10px;
+          right: 10px;
+          left: 10px;
+          width: auto;
+        }
+        #d-name {
+          font-size: 22px !important;
+        }
+        .sheet {
+          max-height: 94vh;
+        }
+      }
+      @media (max-width: 380px) {
+        #d-bal {
+          font-size: 28px !important;
+        }
+        #main {
+          padding: 10px !important;
+          padding-bottom: 90px !important;
+        }
+      }
+      @media (min-width: 769px) {
+        #bnav {
+          display: none !important;
+        }
+        .modal-bg {
+          align-items: center;
+          padding: 20px;
+        }
+        .sheet {
+          border-radius: 20px;
+          max-height: 88vh;
+        }
       }
     </style>
   </head>
   <body>
-    <!-- ════════════════════════════════════════
-     LOADER
-════════════════════════════════════════ -->
+    <!-- LOADER -->
     <div id="loader">
       <div class="loader-logo">
-        <span class="g">AURA</span><span class="w">BANK</span>
+        <span class="g">AURA</span><span style="color: #eaecef">BANK</span>
       </div>
       <div class="ring"></div>
-      <div style="font-size: 11px; color: #848e9c; letter-spacing: 2px">
-        CARGANDO SISTEMA SEGURO
+      <div
+        style="
+          font-size: 10px;
+          color: #848e9c;
+          letter-spacing: 2px;
+          text-transform: uppercase;
+        "
+      >
+        Cargando sistema seguro
       </div>
     </div>
 
-    <!-- ════════════════════════════════════════
-     TOASTS
-════════════════════════════════════════ -->
+    <!-- TOASTS -->
     <div id="toast-box"></div>
 
-    <!-- ════════════════════════════════════════
-     RECEIPT MODAL
-════════════════════════════════════════ -->
+    <!-- RECEIPT MODAL -->
     <div id="rec-modal" class="modal-bg hide">
       <div class="receipt">
         <div class="receipt-bar"></div>
-
-        <div style="text-align: center; margin-bottom: 24px">
+        <div style="text-align: center; margin-bottom: 18px">
           <div
             style="
               font-family: &quot;Chakra Petch&quot;, sans-serif;
               font-weight: 700;
-              font-size: 22px;
+              font-size: 19px;
               letter-spacing: 4px;
               color: #0b0e11;
             "
@@ -805,9 +891,9 @@
           </div>
           <div
             style="
-              font-size: 11px;
+              font-size: 10px;
               color: #aaa;
-              margin-top: 4px;
+              margin-top: 2px;
               font-family: &quot;DM Mono&quot;, monospace;
               letter-spacing: 1px;
             "
@@ -815,15 +901,18 @@
             COMPROBANTE DE TRANSFERENCIA
           </div>
         </div>
-
-        <div style="display: flex; flex-direction: column">
+        <div>
           <div class="rec-row">
             <span class="rec-label">Código</span
-            ><span id="r-cod" class="rec-val mono"></span>
+            ><span
+              id="r-cod"
+              class="rec-val mono"
+              style="font-size: 10px"
+            ></span>
           </div>
           <hr class="rec-divider" />
           <div class="rec-row">
-            <span class="rec-label">Fecha y hora</span
+            <span class="rec-label">Fecha</span
             ><span id="r-fecha" class="rec-val"></span>
           </div>
           <div class="rec-row">
@@ -853,10 +942,10 @@
             ><span id="r-cuenta" class="rec-val mono"></span>
           </div>
           <hr class="rec-divider" />
-          <div class="rec-row" style="padding: 12px 0">
+          <div class="rec-row" style="padding: 10px 0">
             <span
               style="
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: 700;
                 color: #333;
                 font-family: &quot;Chakra Petch&quot;, sans-serif;
@@ -866,40 +955,482 @@
             <span id="r-monto" class="rec-val big"></span>
           </div>
         </div>
-
         <div
           style="
-            margin-top: 20px;
-            padding-top: 16px;
+            margin-top: 14px;
+            padding-top: 12px;
             border-top: 1px dashed #ddd;
             text-align: center;
-            font-size: 11px;
+            font-size: 10px;
             color: #aaa;
             font-family: &quot;DM Mono&quot;, monospace;
           "
         >
-          TRANSFERENCIA COMPLETADA ✓<br />
-          <span style="font-size: 10px"
-            >Este comprobante es constancia oficial de pago</span
+          TRANSFERENCIA COMPLETADA ✓<br /><span style="font-size: 9px"
+            >Comprobante oficial de pago</span
           >
         </div>
-
-        <button class="btn-g" style="margin-top: 22px" onclick="closeReceipt()">
+        <button class="btn-g" style="margin-top: 16px" onclick="closeReceipt()">
           CERRAR
         </button>
       </div>
     </div>
 
-    <!-- ════════════════════════════════════════
-     AUTH SECTION
-════════════════════════════════════════ -->
-    <div id="auth-sec" class="auth-bg" style="display: none">
-      <div style="width: 100%; max-width: 420px">
-        <!-- Logo -->
-        <div style="text-align: center; margin-bottom: 36px">
+    <!-- RETIRO MODAL -->
+    <div id="retiro-modal" class="modal-bg hide">
+      <div class="sheet" id="retiro-sheet">
+        <div
+          style="display: flex; justify-content: center; padding: 14px 0 4px"
+        >
           <div
             style="
-              font-size: 40px;
+              width: 36px;
+              height: 4px;
+              background: #2b3139;
+              border-radius: 2px;
+            "
+          ></div>
+        </div>
+        <div style="padding: 8px 22px 16px; border-bottom: 1px solid #2b3139">
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+            "
+          >
+            <div>
+              <div style="font-size: 18px; font-weight: 700">
+                Retirar fondos
+              </div>
+              <div style="font-size: 12px; color: #848e9c; margin-top: 2px">
+                Transferencia a tarjeta bancaria
+              </div>
+            </div>
+            <button
+              onclick="closeRetiro()"
+              style="
+                background: rgba(255, 255, 255, 0.06);
+                border: none;
+                width: 34px;
+                height: 34px;
+                border-radius: 50%;
+                cursor: pointer;
+                color: #848e9c;
+                font-size: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: background 0.2s;
+                line-height: 1;
+              "
+              onmouseover="this.style.background = 'rgba(255,255,255,.1)'"
+              onmouseout="this.style.background = 'rgba(255,255,255,.06)'"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+
+        <!-- FORM -->
+        <div id="retiro-form-wrap" style="padding: 18px 22px 28px">
+          <div
+            style="
+              background: #0b0e11;
+              border: 1px solid #2b3139;
+              border-radius: 12px;
+              padding: 12px 16px;
+              margin-bottom: 18px;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            "
+          >
+            <span
+              style="
+                font-size: 12px;
+                color: #848e9c;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+              "
+              >Saldo disponible</span
+            >
+            <span
+              id="ret-bal"
+              class="mono"
+              style="font-size: 20px; font-weight: 700; color: #f0b90b"
+              >$0.00</span
+            >
+          </div>
+
+          <!-- Card preview -->
+          <div
+            class="card-preview"
+            id="card-preview"
+            style="margin-bottom: 18px"
+          >
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 24px;
+              "
+            >
+              <div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: rgba(255, 255, 255, 0.38);
+                    letter-spacing: 1px;
+                    text-transform: uppercase;
+                    margin-bottom: 4px;
+                  "
+                >
+                  Número de tarjeta
+                </div>
+                <div
+                  id="card-num-display"
+                  class="mono"
+                  style="
+                    font-size: 16px;
+                    letter-spacing: 3px;
+                    color: rgba(255, 255, 255, 0.8);
+                    font-weight: 500;
+                  "
+                >
+                  •••• •••• •••• ••••
+                </div>
+              </div>
+              <div
+                id="card-brand-icon"
+                style="
+                  width: 52px;
+                  height: 34px;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                "
+              >
+                <svg
+                  width="40"
+                  height="26"
+                  viewBox="0 0 40 26"
+                  fill="none"
+                  opacity=".2"
+                >
+                  <rect width="40" height="26" rx="4" fill="#fff" />
+                </svg>
+              </div>
+            </div>
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-end;
+              "
+            >
+              <div>
+                <div
+                  style="
+                    font-size: 9px;
+                    color: rgba(255, 255, 255, 0.38);
+                    letter-spacing: 1px;
+                    text-transform: uppercase;
+                    margin-bottom: 3px;
+                  "
+                >
+                  Titular
+                </div>
+                <div
+                  id="card-name-display"
+                  style="
+                    font-size: 13px;
+                    font-weight: 600;
+                    letter-spacing: 0.5px;
+                    color: rgba(255, 255, 255, 0.7);
+                    text-transform: uppercase;
+                  "
+                >
+                  NOMBRE APELLIDO
+                </div>
+              </div>
+              <div style="text-align: right">
+                <div
+                  style="
+                    font-size: 9px;
+                    color: rgba(255, 255, 255, 0.38);
+                    letter-spacing: 1px;
+                    text-transform: uppercase;
+                    margin-bottom: 3px;
+                  "
+                >
+                  Vence
+                </div>
+                <div
+                  id="card-exp-display"
+                  class="mono"
+                  style="
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: rgba(255, 255, 255, 0.7);
+                  "
+                >
+                  MM/AA
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Fields -->
+          <div style="display: flex; flex-direction: column; gap: 13px">
+            <div>
+              <label class="inp-label">Número de tarjeta</label>
+              <div style="position: relative">
+                <input
+                  id="ret-cardnum"
+                  class="inp"
+                  type="text"
+                  inputmode="numeric"
+                  placeholder="0000 0000 0000 0000"
+                  maxlength="19"
+                  style="
+                    font-family: &quot;DM Mono&quot;, monospace;
+                    letter-spacing: 2px;
+                    padding-right: 54px;
+                  "
+                  oninput="onCardNumInput(this)"
+                  onkeydown="cardNumKeydown(event, this)"
+                />
+                <div
+                  id="card-brand-sm"
+                  style="
+                    position: absolute;
+                    right: 10px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    width: 38px;
+                    height: 24px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                  "
+                >
+                  <svg
+                    width="32"
+                    height="20"
+                    viewBox="0 0 40 26"
+                    fill="none"
+                    opacity=".18"
+                  >
+                    <rect width="40" height="26" rx="4" fill="#848E9C" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+            <div>
+              <label class="inp-label">Nombre en la tarjeta</label>
+              <input
+                id="ret-name"
+                class="inp"
+                type="text"
+                placeholder="JUAN PÉREZ"
+                oninput="updateCardName(this.value)"
+              />
+            </div>
+            <div
+              style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px"
+            >
+              <div>
+                <label class="inp-label">Vencimiento</label>
+                <input
+                  id="ret-expiry"
+                  class="inp"
+                  type="text"
+                  inputmode="numeric"
+                  placeholder="MM/AA"
+                  maxlength="5"
+                  style="
+                    font-family: &quot;DM Mono&quot;, monospace;
+                    letter-spacing: 1px;
+                  "
+                  oninput="onExpiryInput(this)"
+                />
+              </div>
+              <div>
+                <label class="inp-label">CVV / CVC</label>
+                <input
+                  id="ret-cvv"
+                  class="inp"
+                  type="password"
+                  inputmode="numeric"
+                  placeholder="•••"
+                  maxlength="4"
+                  style="
+                    font-family: &quot;DM Mono&quot;, monospace;
+                    letter-spacing: 2px;
+                  "
+                />
+              </div>
+            </div>
+            <div>
+              <label class="inp-label">Monto a retirar (USD)</label>
+              <div style="position: relative">
+                <span
+                  style="
+                    position: absolute;
+                    left: 16px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    color: #848e9c;
+                    font-size: 18px;
+                    font-family: &quot;DM Mono&quot;, monospace;
+                    pointer-events: none;
+                  "
+                  >$</span
+                >
+                <input
+                  id="ret-amount"
+                  class="inp"
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  placeholder="0.00"
+                  style="
+                    padding-left: 32px;
+                    font-family: &quot;DM Mono&quot;, monospace;
+                    font-size: 20px;
+                    font-weight: 500;
+                  "
+                />
+              </div>
+            </div>
+            <button
+              id="btn-ret"
+              class="btn-r"
+              style="margin-top: 2px; font-size: 14px; letter-spacing: 0.8px"
+              onclick="doRetiro()"
+            >
+              ↓ &nbsp;PROCESAR RETIRO
+            </button>
+          </div>
+        </div>
+
+        <!-- PROCESSING -->
+        <div
+          id="retiro-processing"
+          style="display: none; padding: 28px 24px 36px"
+        >
+          <div style="text-align: center; margin-bottom: 28px">
+            <div class="ring" style="margin: 0 auto 14px"></div>
+            <div style="font-size: 16px; font-weight: 700; margin-bottom: 5px">
+              Procesando retiro
+            </div>
+            <div style="font-size: 12px; color: #848e9c">
+              No cierres esta ventana
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 0">
+            <div class="proc-step" id="ps-1">
+              <div class="step-dot"></div>
+              <span style="font-size: 13px; font-weight: 500"
+                >Validando datos de tarjeta</span
+              >
+            </div>
+            <div class="proc-step" id="ps-2">
+              <div class="step-dot"></div>
+              <span style="font-size: 13px; font-weight: 500"
+                >Verificando saldo disponible</span
+              >
+            </div>
+            <div class="proc-step" id="ps-3">
+              <div class="step-dot"></div>
+              <span style="font-size: 13px; font-weight: 500"
+                >Conectando con red bancaria</span
+              >
+            </div>
+            <div class="proc-step" id="ps-4">
+              <div class="step-dot"></div>
+              <span style="font-size: 13px; font-weight: 500"
+                >Procesando transferencia interbancaria</span
+              >
+            </div>
+            <div class="proc-step" id="ps-5">
+              <div class="step-dot"></div>
+              <span style="font-size: 13px; font-weight: 500"
+                >Confirmando transacción</span
+              >
+            </div>
+            <div class="proc-step" id="ps-6">
+              <div class="step-dot"></div>
+              <span style="font-size: 13px; font-weight: 500"
+                >Actualizando saldo</span
+              >
+            </div>
+          </div>
+        </div>
+
+        <!-- SUCCESS -->
+        <div
+          id="retiro-success"
+          style="display: none; padding: 28px 24px 36px; text-align: center"
+        >
+          <div
+            style="
+              width: 68px;
+              height: 68px;
+              background: rgba(3, 166, 109, 0.12);
+              border: 1px solid rgba(3, 166, 109, 0.3);
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              margin: 0 auto 18px;
+            "
+          >
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="#03A66D">
+              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+            </svg>
+          </div>
+          <div style="font-size: 20px; font-weight: 700; margin-bottom: 6px">
+            ¡Retiro exitoso!
+          </div>
+          <div style="font-size: 12px; color: #848e9c; margin-bottom: 22px">
+            Los fondos llegarán en 1–3 días hábiles
+          </div>
+          <div
+            id="ret-success-amount"
+            style="
+              font-size: 38px;
+              font-weight: 700;
+              color: #03a66d;
+              font-family: &quot;DM Mono&quot;, monospace;
+              margin-bottom: 6px;
+            "
+          >
+            $0.00
+          </div>
+          <div
+            id="ret-success-card"
+            style="
+              font-size: 13px;
+              color: #848e9c;
+              font-family: &quot;DM Mono&quot;, monospace;
+              margin-bottom: 26px;
+            "
+          ></div>
+          <button class="btn-g" onclick="closeRetiro()">ACEPTAR</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- AUTH SECTION -->
+    <div id="auth-sec" class="auth-bg" style="display: none">
+      <div style="width: 100%; max-width: 420px">
+        <div style="text-align: center; margin-bottom: 32px">
+          <div
+            style="
+              font-size: 38px;
               font-weight: 700;
               letter-spacing: 6px;
               line-height: 1;
@@ -911,23 +1442,22 @@
           <div
             style="
               color: #848e9c;
-              font-size: 12px;
+              font-size: 11px;
               margin-top: 8px;
-              letter-spacing: 2px;
+              letter-spacing: 2.5px;
+              text-transform: uppercase;
             "
           >
-            BANCA DIGITAL · SEGURA · MODERNA
+            Banca Digital · Segura · Moderna
           </div>
         </div>
-
-        <!-- Tabs -->
         <div
           style="
             display: flex;
             background: #1e2329;
-            border-radius: 12px;
+            border-radius: 14px;
             padding: 4px;
-            margin-bottom: 24px;
+            margin-bottom: 20px;
             border: 1px solid #2b3139;
             gap: 4px;
           "
@@ -939,18 +1469,16 @@
             REGISTRARSE
           </button>
         </div>
-
-        <!-- Login -->
-        <div id="form-in" class="card" style="padding: 28px">
-          <div style="margin-bottom: 24px">
-            <div style="font-size: 18px; font-weight: 700">
+        <div id="form-in" class="card" style="padding: 26px">
+          <div style="margin-bottom: 22px">
+            <div style="font-size: 17px; font-weight: 700">
               Bienvenido de vuelta
             </div>
-            <div style="color: #848e9c; font-size: 13px; margin-top: 5px">
+            <div style="color: #848e9c; font-size: 13px; margin-top: 4px">
               Accede a tu cuenta AURABANK
             </div>
           </div>
-          <div style="display: flex; flex-direction: column; gap: 16px">
+          <div style="display: flex; flex-direction: column; gap: 14px">
             <div>
               <label class="inp-label">Correo electrónico</label
               ><input
@@ -972,35 +1500,33 @@
             <button
               id="btn-in"
               class="btn-g"
-              style="margin-top: 6px; letter-spacing: 1px"
+              style="margin-top: 4px; letter-spacing: 1px"
               onclick="doLogin()"
             >
               INGRESAR
             </button>
           </div>
         </div>
-
-        <!-- Register -->
-        <div id="form-reg" class="card" style="padding: 28px; display: none">
-          <div style="margin-bottom: 24px">
-            <div style="font-size: 18px; font-weight: 700">
+        <div id="form-reg" class="card" style="padding: 26px; display: none">
+          <div style="margin-bottom: 22px">
+            <div style="font-size: 17px; font-weight: 700">
               Crear cuenta nueva
             </div>
-            <div style="color: #848e9c; font-size: 13px; margin-top: 5px">
+            <div style="color: #848e9c; font-size: 13px; margin-top: 4px">
               Únete y recibe un
               <span style="color: #f0b90b; font-weight: 600"
                 >bono de $50.00</span
               >
             </div>
           </div>
-          <div style="display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; flex-direction: column; gap: 13px">
             <div>
               <label class="inp-label">Nombres completos</label
               ><input
                 id="r-nom"
                 class="inp"
                 type="text"
-                placeholder="Ej: JUAN CARLOS PÉREZ"
+                placeholder="JUAN CARLOS PÉREZ"
               />
             </div>
             <div>
@@ -1033,32 +1559,30 @@
             <button
               id="btn-reg"
               class="btn-g"
-              style="margin-top: 6px; letter-spacing: 1px"
+              style="margin-top: 4px; letter-spacing: 1px"
               onclick="doRegister()"
             >
               CREAR CUENTA
             </button>
             <div style="text-align: center; color: #848e9c; font-size: 11px">
-              Al registrarte aceptas los términos y condiciones de AURABANK
+              Al registrarte aceptas los términos y condiciones
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ════════════════════════════════════════
-     APP SECTION
-════════════════════════════════════════ -->
+    <!-- APP SECTION -->
     <div id="app-sec" style="display: none; min-height: 100vh">
       <div style="display: flex; min-height: 100vh">
-        <!-- ── Sidebar ── -->
+        <!-- Sidebar -->
         <aside
           id="sidebar"
           style="
-            width: 248px;
+            width: 240px;
             background: #181a20;
             border-right: 1px solid #2b3139;
-            padding: 24px 14px;
+            padding: 22px 12px;
             display: flex;
             flex-direction: column;
             position: fixed;
@@ -1069,9 +1593,8 @@
             overflow-y: auto;
           "
         >
-          <!-- Logo -->
-          <div style="padding: 6px 12px 28px">
-            <div style="font-size: 24px; font-weight: 700; letter-spacing: 5px">
+          <div style="padding: 4px 12px 24px">
+            <div style="font-size: 22px; font-weight: 700; letter-spacing: 5px">
               <span class="gtext">AURA</span
               ><span style="color: #eaecef">BANK</span>
             </div>
@@ -1080,24 +1603,28 @@
                 display: flex;
                 align-items: center;
                 gap: 6px;
-                margin-top: 6px;
+                margin-top: 5px;
               "
             >
               <div class="notif-dot"></div>
-              <span style="font-size: 10px; color: #848e9c; letter-spacing: 1px"
-                >SISTEMA EN LÍNEA</span
+              <span
+                style="
+                  font-size: 10px;
+                  color: #848e9c;
+                  letter-spacing: 1px;
+                  text-transform: uppercase;
+                "
+                >Sistema en línea</span
               >
             </div>
           </div>
-
-          <!-- User mini card -->
           <div
             style="
               background: #1e2329;
               border: 1px solid #2b3139;
-              border-radius: 12px;
+              border-radius: 14px;
               padding: 14px;
-              margin-bottom: 24px;
+              margin-bottom: 22px;
             "
           >
             <div style="display: flex; align-items: center; gap: 10px">
@@ -1156,21 +1683,18 @@
               >
             </div>
           </div>
-
-          <!-- Nav links -->
-          <nav style="flex: 1; display: flex; flex-direction: column; gap: 4px">
+          <nav style="flex: 1; display: flex; flex-direction: column; gap: 3px">
             <div class="nav-item act" id="sn-dash" onclick="showView('dash')">
               <svg
-                width="18"
-                height="18"
+                width="17"
+                height="17"
                 viewBox="0 0 24 24"
                 fill="currentColor"
               >
                 <path
                   d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"
-                />
-              </svg>
-              Dashboard
+                /></svg
+              >Dashboard
             </div>
             <div
               class="nav-item"
@@ -1178,8 +1702,8 @@
               onclick="showView('transfer')"
             >
               <svg
-                width="18"
-                height="18"
+                width="17"
+                height="17"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -1187,14 +1711,15 @@
                 stroke-linecap="round"
                 stroke-linejoin="round"
               >
-                <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
-              </svg>
-              Transferencias
+                <path
+                  d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"
+                /></svg
+              >Transferencias
             </div>
             <div class="nav-item" id="sn-reports" onclick="showView('reports')">
               <svg
-                width="18"
-                height="18"
+                width="17"
+                height="17"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -1204,20 +1729,33 @@
               >
                 <path
                   d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                />
-              </svg>
-              Reportes
+                /></svg
+              >Reportes
+            </div>
+            <div class="nav-item" id="sn-retiros" onclick="showView('retiros')">
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+                <line x1="1" y1="10" x2="23" y2="10" /></svg
+              >Retiros
             </div>
           </nav>
-
           <div
             class="nav-item"
             onclick="doLogout()"
             style="color: #cf304a; margin-top: 8px"
           >
             <svg
-              width="18"
-              height="18"
+              width="17"
+              height="17"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -1227,32 +1765,31 @@
             >
               <path
                 d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"
-              />
-            </svg>
-            Cerrar sesión
+              /></svg
+            >Cerrar sesión
           </div>
         </aside>
 
-        <!-- ── Main area ── -->
+        <!-- Main -->
         <main
           id="main"
           style="
             flex: 1;
-            margin-left: 248px;
-            padding: 32px;
+            margin-left: 240px;
+            padding: 28px;
             overflow-y: auto;
             min-height: 100vh;
             padding-bottom: 40px;
           "
         >
-          <!-- ─── DASHBOARD ─── -->
+          <!-- DASHBOARD -->
           <div id="view-dash" class="view act">
-            <div style="margin-bottom: 28px">
+            <div style="margin-bottom: 24px">
               <div
                 style="
-                  font-size: 12px;
+                  font-size: 11px;
                   color: #848e9c;
-                  letter-spacing: 1px;
+                  letter-spacing: 1.5px;
                   text-transform: uppercase;
                 "
               >
@@ -1261,7 +1798,7 @@
               <div
                 id="d-name"
                 style="
-                  font-size: 28px;
+                  font-size: 26px;
                   font-weight: 700;
                   margin-top: 4px;
                   letter-spacing: -0.3px;
@@ -1270,26 +1807,25 @@
                 —
               </div>
             </div>
-
             <!-- Balance card -->
-            <div class="bal-card" style="padding: 28px; margin-bottom: 24px">
+            <div class="bal-card" style="padding: 26px; margin-bottom: 20px">
               <div
                 style="
                   display: flex;
                   justify-content: space-between;
                   align-items: flex-start;
                   flex-wrap: wrap;
-                  gap: 16px;
+                  gap: 14px;
                 "
               >
                 <div>
                   <div
                     style="
-                      font-size: 11px;
+                      font-size: 10px;
                       color: #848e9c;
                       text-transform: uppercase;
                       letter-spacing: 1.2px;
-                      margin-bottom: 10px;
+                      margin-bottom: 8px;
                     "
                   >
                     Saldo disponible
@@ -1298,18 +1834,17 @@
                     id="d-bal"
                     class="mono"
                     style="
-                      font-size: 46px;
+                      font-size: 44px;
                       font-weight: 700;
                       color: #f0b90b;
                       line-height: 1;
-                      transition: all 0.3s;
                     "
                   >
                     $0.00
                   </div>
                   <div
                     style="
-                      margin-top: 14px;
+                      margin-top: 12px;
                       display: flex;
                       align-items: center;
                       gap: 8px;
@@ -1318,7 +1853,7 @@
                   >
                     <span
                       style="
-                        font-size: 11px;
+                        font-size: 10px;
                         color: #848e9c;
                         text-transform: uppercase;
                         letter-spacing: 0.5px;
@@ -1329,7 +1864,7 @@
                       id="d-acc"
                       class="mono"
                       style="
-                        font-size: 14px;
+                        font-size: 13px;
                         font-weight: 500;
                         letter-spacing: 2px;
                       "
@@ -1351,8 +1886,8 @@
                       onmouseout="this.style.color = '#848E9C'"
                     >
                       <svg
-                        width="14"
-                        height="14"
+                        width="13"
+                        height="13"
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
@@ -1368,8 +1903,8 @@
                 </div>
                 <div
                   style="
-                    width: 64px;
-                    height: 64px;
+                    width: 56px;
+                    height: 56px;
                     border-radius: 50%;
                     background: rgba(240, 185, 11, 0.1);
                     border: 2px solid rgba(240, 185, 11, 0.25);
@@ -1379,8 +1914,8 @@
                   "
                 >
                   <svg
-                    width="30"
-                    height="30"
+                    width="24"
+                    height="24"
                     viewBox="0 0 24 24"
                     fill="#F0B90B"
                   >
@@ -1390,64 +1925,81 @@
                   </svg>
                 </div>
               </div>
-
               <div
                 style="
                   display: grid;
-                  grid-template-columns: 1fr 1fr;
-                  gap: 12px;
-                  margin-top: 24px;
-                  padding-top: 22px;
+                  grid-template-columns: 1fr 1fr 1fr;
+                  gap: 10px;
+                  margin-top: 20px;
+                  padding-top: 18px;
                   border-top: 1px solid rgba(255, 255, 255, 0.05);
                 "
               >
                 <button
                   class="btn-g"
-                  style="font-size: 13px; padding: 11px"
+                  style="font-size: 12px; padding: 10px 6px"
                   onclick="showView('transfer')"
                 >
-                  ↑ &nbsp;TRANSFERIR
+                  ↑ ENVIAR
                 </button>
                 <button
                   class="btn-o"
                   style="
-                    font-size: 13px;
-                    padding: 11px;
+                    font-size: 12px;
+                    padding: 10px 6px;
                     display: block;
                     text-align: center;
+                    width: 100%;
                   "
                   onclick="showView('reports')"
                 >
-                  ↓ &nbsp;HISTORIAL
+                  ≡ HISTORIAL
+                </button>
+                <button
+                  class="btn-r"
+                  style="font-size: 12px; padding: 10px 6px"
+                  onclick="openRetiro()"
+                >
+                  ↓ RETIRAR
                 </button>
               </div>
             </div>
-
-            <!-- Quick stats -->
+            <!-- Stats -->
             <div
               style="
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-                gap: 14px;
-                margin-bottom: 24px;
+                grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+                gap: 12px;
+                margin-bottom: 20px;
               "
             >
               <div class="stat">
                 <div
                   style="
-                    font-size: 11px;
+                    font-size: 10px;
                     color: #848e9c;
                     text-transform: uppercase;
                     letter-spacing: 0.5px;
                     margin-bottom: 8px;
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
                   "
                 >
-                  Total Enviado
+                  <div
+                    style="
+                      width: 6px;
+                      height: 6px;
+                      background: #cf304a;
+                      border-radius: 50%;
+                    "
+                  ></div>
+                  Enviado
                 </div>
                 <div
                   id="d-sent"
                   class="mono"
-                  style="font-size: 22px; font-weight: 700; color: #cf304a"
+                  style="font-size: 20px; font-weight: 700; color: #cf304a"
                 >
                   $0.00
                 </div>
@@ -1455,19 +2007,30 @@
               <div class="stat">
                 <div
                   style="
-                    font-size: 11px;
+                    font-size: 10px;
                     color: #848e9c;
                     text-transform: uppercase;
                     letter-spacing: 0.5px;
                     margin-bottom: 8px;
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
                   "
                 >
-                  Total Recibido
+                  <div
+                    style="
+                      width: 6px;
+                      height: 6px;
+                      background: #03a66d;
+                      border-radius: 50%;
+                    "
+                  ></div>
+                  Recibido
                 </div>
                 <div
                   id="d-recv"
                   class="mono"
-                  style="font-size: 22px; font-weight: 700; color: #03a66d"
+                  style="font-size: 20px; font-weight: 700; color: #03a66d"
                 >
                   $0.00
                 </div>
@@ -1475,30 +2038,40 @@
               <div class="stat">
                 <div
                   style="
-                    font-size: 11px;
+                    font-size: 10px;
                     color: #848e9c;
                     text-transform: uppercase;
                     letter-spacing: 0.5px;
                     margin-bottom: 8px;
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
                   "
                 >
-                  Transferencias
+                  <div
+                    style="
+                      width: 6px;
+                      height: 6px;
+                      background: #f0b90b;
+                      border-radius: 50%;
+                    "
+                  ></div>
+                  Movimientos
                 </div>
                 <div
                   id="d-count"
                   class="mono"
-                  style="font-size: 22px; font-weight: 700; color: #f0b90b"
+                  style="font-size: 20px; font-weight: 700; color: #f0b90b"
                 >
                   0
                 </div>
               </div>
             </div>
-
-            <!-- Recent transactions -->
+            <!-- Recent TX -->
             <div class="card" style="overflow: hidden; padding: 0">
               <div
                 style="
-                  padding: 18px 20px 14px;
+                  padding: 16px 18px 13px;
                   border-bottom: 1px solid #2b3139;
                   display: flex;
                   justify-content: space-between;
@@ -1517,7 +2090,7 @@
                     color: #848e9c;
                     font-family: &quot;Chakra Petch&quot;, sans-serif;
                     font-size: 12px;
-                    letter-spacing: 0.3px;
+                    transition: color 0.2s;
                   "
                   onmouseover="this.style.color = '#F0B90B'"
                   onmouseout="this.style.color = '#848E9C'"
@@ -1531,33 +2104,31 @@
             </div>
           </div>
 
-          <!-- ─── TRANSFER ─── -->
+          <!-- TRANSFER -->
           <div id="view-transfer" class="view">
-            <div style="margin-bottom: 28px">
+            <div style="margin-bottom: 24px">
               <div
                 style="
-                  font-size: 26px;
+                  font-size: 24px;
                   font-weight: 700;
                   letter-spacing: -0.3px;
                 "
               >
                 Transferencias
               </div>
-              <div style="color: #848e9c; font-size: 13px; margin-top: 5px">
+              <div style="color: #848e9c; font-size: 13px; margin-top: 4px">
                 Envía dinero a otros usuarios registrados
               </div>
             </div>
-
-            <div style="max-width: 560px">
-              <div class="card" style="padding: 28px">
-                <!-- Saldo mini -->
+            <div style="max-width: 540px">
+              <div class="card" style="padding: 26px">
                 <div
                   style="
                     background: #0b0e11;
                     border: 1px solid #2b3139;
-                    border-radius: 10px;
-                    padding: 14px 18px;
-                    margin-bottom: 26px;
+                    border-radius: 12px;
+                    padding: 13px 16px;
+                    margin-bottom: 22px;
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
@@ -1579,17 +2150,15 @@
                     >$0.00</span
                   >
                 </div>
-
-                <!-- Step 1 -->
-                <div style="margin-bottom: 22px">
+                <div style="margin-bottom: 20px">
                   <div
                     style="
-                      font-size: 11px;
+                      font-size: 10px;
                       color: #f0b90b;
                       text-transform: uppercase;
                       letter-spacing: 1px;
                       font-weight: 700;
-                      margin-bottom: 14px;
+                      margin-bottom: 12px;
                       display: flex;
                       align-items: center;
                       gap: 8px;
@@ -1610,14 +2179,14 @@
                         flex-shrink: 0;
                       "
                       >1</span
-                    >
-                    CUENTA DESTINO
+                    >CUENTA DESTINO
                   </div>
                   <div style="display: flex; gap: 10px; flex-wrap: wrap">
                     <input
                       id="tr-acc"
                       class="inp"
                       type="text"
+                      inputmode="numeric"
                       placeholder="Número de cuenta (10 dígitos)"
                       maxlength="10"
                       style="
@@ -1633,18 +2202,16 @@
                     </button>
                   </div>
                 </div>
-
-                <!-- Verified -->
                 <div
                   id="verified-box"
-                  style="display: none; margin-bottom: 22px"
+                  style="display: none; margin-bottom: 20px"
                   class="verified-box"
                 >
                   <div style="display: flex; align-items: center; gap: 12px">
                     <div
                       style="
-                        width: 40px;
-                        height: 40px;
+                        width: 38px;
+                        height: 38px;
                         border-radius: 50%;
                         background: rgba(3, 166, 109, 0.15);
                         display: flex;
@@ -1654,8 +2221,8 @@
                       "
                     >
                       <svg
-                        width="20"
-                        height="20"
+                        width="18"
+                        height="18"
                         viewBox="0 0 24 24"
                         fill="#03A66D"
                       >
@@ -1667,11 +2234,11 @@
                     <div>
                       <div
                         style="
-                          font-size: 11px;
+                          font-size: 10px;
                           color: #848e9c;
                           text-transform: uppercase;
                           letter-spacing: 0.5px;
-                          margin-bottom: 3px;
+                          margin-bottom: 2px;
                         "
                       >
                         Destinatario verificado
@@ -1679,7 +2246,7 @@
                       <div
                         id="verified-name"
                         style="
-                          font-size: 16px;
+                          font-size: 15px;
                           font-weight: 700;
                           color: #03a66d;
                         "
@@ -1689,17 +2256,15 @@
                     </div>
                   </div>
                 </div>
-
-                <!-- Step 2 -->
                 <div id="tr-step2" style="display: none">
                   <div
                     style="
-                      font-size: 11px;
+                      font-size: 10px;
                       color: #f0b90b;
                       text-transform: uppercase;
                       letter-spacing: 1px;
                       font-weight: 700;
-                      margin-bottom: 14px;
+                      margin-bottom: 12px;
                       display: flex;
                       align-items: center;
                       gap: 8px;
@@ -1720,10 +2285,9 @@
                         flex-shrink: 0;
                       "
                       >2</span
-                    >
-                    MONTO A ENVIAR
+                    >MONTO A ENVIAR
                   </div>
-                  <div style="margin-bottom: 20px">
+                  <div style="margin-bottom: 18px">
                     <label class="inp-label">Monto (USD)</label>
                     <div style="position: relative">
                       <span
@@ -1758,19 +2322,17 @@
                   <button
                     id="btn-tr"
                     class="btn-g"
-                    style="padding: 15px; letter-spacing: 1px"
+                    style="padding: 14px; letter-spacing: 1px"
                     onclick="doTransfer()"
                   >
                     ✓ &nbsp;CONFIRMAR TRANSFERENCIA
                   </button>
                 </div>
-
-                <!-- Hint -->
                 <div
                   id="tr-hint"
                   style="
                     text-align: center;
-                    padding: 24px 0;
+                    padding: 22px 0;
                     color: #848e9c;
                     font-size: 13px;
                     line-height: 1.7;
@@ -1783,30 +2345,28 @@
             </div>
           </div>
 
-          <!-- ─── REPORTS ─── -->
+          <!-- REPORTS -->
           <div id="view-reports" class="view">
-            <div style="margin-bottom: 28px">
+            <div style="margin-bottom: 24px">
               <div
                 style="
-                  font-size: 26px;
+                  font-size: 24px;
                   font-weight: 700;
                   letter-spacing: -0.3px;
                 "
               >
                 Reportes
               </div>
-              <div style="color: #848e9c; font-size: 13px; margin-top: 5px">
+              <div style="color: #848e9c; font-size: 13px; margin-top: 4px">
                 Historial completo de movimientos
               </div>
             </div>
-
-            <!-- Stats grid -->
             <div
               style="
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-                gap: 14px;
-                margin-bottom: 26px;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                gap: 12px;
+                margin-bottom: 22px;
               "
             >
               <div class="stat">
@@ -1814,14 +2374,14 @@
                   style="
                     display: flex;
                     align-items: center;
-                    gap: 10px;
-                    margin-bottom: 10px;
+                    gap: 9px;
+                    margin-bottom: 9px;
                   "
                 >
                   <div
                     style="
-                      width: 34px;
-                      height: 34px;
+                      width: 32px;
+                      height: 32px;
                       background: rgba(207, 48, 74, 0.1);
                       border-radius: 8px;
                       display: flex;
@@ -1830,8 +2390,8 @@
                     "
                   >
                     <svg
-                      width="17"
-                      height="17"
+                      width="14"
+                      height="14"
                       viewBox="0 0 24 24"
                       fill="#CF304A"
                     >
@@ -1840,18 +2400,18 @@
                   </div>
                   <span
                     style="
-                      font-size: 11px;
+                      font-size: 10px;
                       color: #848e9c;
                       text-transform: uppercase;
                       letter-spacing: 0.5px;
                     "
-                    >Total Enviado</span
+                    >Enviado</span
                   >
                 </div>
                 <div
                   id="rp-sent"
                   class="mono"
-                  style="font-size: 26px; font-weight: 700; color: #cf304a"
+                  style="font-size: 24px; font-weight: 700; color: #cf304a"
                 >
                   $0.00
                 </div>
@@ -1861,14 +2421,14 @@
                   style="
                     display: flex;
                     align-items: center;
-                    gap: 10px;
-                    margin-bottom: 10px;
+                    gap: 9px;
+                    margin-bottom: 9px;
                   "
                 >
                   <div
                     style="
-                      width: 34px;
-                      height: 34px;
+                      width: 32px;
+                      height: 32px;
                       background: rgba(3, 166, 109, 0.1);
                       border-radius: 8px;
                       display: flex;
@@ -1877,8 +2437,8 @@
                     "
                   >
                     <svg
-                      width="17"
-                      height="17"
+                      width="14"
+                      height="14"
                       viewBox="0 0 24 24"
                       fill="#03A66D"
                     >
@@ -1887,18 +2447,18 @@
                   </div>
                   <span
                     style="
-                      font-size: 11px;
+                      font-size: 10px;
                       color: #848e9c;
                       text-transform: uppercase;
                       letter-spacing: 0.5px;
                     "
-                    >Total Recibido</span
+                    >Recibido</span
                   >
                 </div>
                 <div
                   id="rp-recv"
                   class="mono"
-                  style="font-size: 26px; font-weight: 700; color: #03a66d"
+                  style="font-size: 24px; font-weight: 700; color: #03a66d"
                 >
                   $0.00
                 </div>
@@ -1908,14 +2468,14 @@
                   style="
                     display: flex;
                     align-items: center;
-                    gap: 10px;
-                    margin-bottom: 10px;
+                    gap: 9px;
+                    margin-bottom: 9px;
                   "
                 >
                   <div
                     style="
-                      width: 34px;
-                      height: 34px;
+                      width: 32px;
+                      height: 32px;
                       background: rgba(240, 185, 11, 0.1);
                       border-radius: 8px;
                       display: flex;
@@ -1924,24 +2484,22 @@
                     "
                   >
                     <svg
-                      width="17"
-                      height="17"
+                      width="14"
+                      height="14"
                       viewBox="0 0 24 24"
                       fill="#F0B90B"
                     >
                       <path
-                        d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2 2.29c-.63.63-.18 1.71.71 1.71H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
-                        stroke="#F0B90B"
-                        stroke-width="1.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
+                        d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0016.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 002 8.5c0 2.3 1.5 4.05 3 5.5l7 7 7-7z"
                         fill="none"
+                        stroke="#F0B90B"
+                        stroke-width="2"
                       />
                     </svg>
                   </div>
                   <span
                     style="
-                      font-size: 11px;
+                      font-size: 10px;
                       color: #848e9c;
                       text-transform: uppercase;
                       letter-spacing: 0.5px;
@@ -1952,7 +2510,7 @@
                 <div
                   id="rp-cnt"
                   class="mono"
-                  style="font-size: 26px; font-weight: 700; color: #f0b90b"
+                  style="font-size: 24px; font-weight: 700; color: #f0b90b"
                 >
                   0
                 </div>
@@ -1962,14 +2520,14 @@
                   style="
                     display: flex;
                     align-items: center;
-                    gap: 10px;
-                    margin-bottom: 10px;
+                    gap: 9px;
+                    margin-bottom: 9px;
                   "
                 >
                   <div
                     style="
-                      width: 34px;
-                      height: 34px;
+                      width: 32px;
+                      height: 32px;
                       background: rgba(240, 185, 11, 0.1);
                       border-radius: 8px;
                       display: flex;
@@ -1978,8 +2536,8 @@
                     "
                   >
                     <svg
-                      width="17"
-                      height="17"
+                      width="14"
+                      height="14"
                       viewBox="0 0 24 24"
                       fill="#F0B90B"
                     >
@@ -1990,7 +2548,7 @@
                   </div>
                   <span
                     style="
-                      font-size: 11px;
+                      font-size: 10px;
                       color: #848e9c;
                       text-transform: uppercase;
                       letter-spacing: 0.5px;
@@ -2001,18 +2559,16 @@
                 <div
                   id="rp-bal"
                   class="mono"
-                  style="font-size: 26px; font-weight: 700; color: #f0b90b"
+                  style="font-size: 24px; font-weight: 700; color: #f0b90b"
                 >
                   $0.00
                 </div>
               </div>
             </div>
-
-            <!-- Full list -->
             <div class="card" style="overflow: hidden; padding: 0">
               <div
                 style="
-                  padding: 18px 20px 14px;
+                  padding: 16px 18px 13px;
                   border-bottom: 1px solid #2b3139;
                 "
               >
@@ -2025,10 +2581,61 @@
               </div>
             </div>
           </div>
+
+          <!-- RETIROS VIEW -->
+          <div id="view-retiros" class="view">
+            <div
+              style="
+                margin-bottom: 24px;
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                flex-wrap: wrap;
+                gap: 14px;
+              "
+            >
+              <div>
+                <div
+                  style="
+                    font-size: 24px;
+                    font-weight: 700;
+                    letter-spacing: -0.3px;
+                  "
+                >
+                  Retiros
+                </div>
+                <div style="color: #848e9c; font-size: 13px; margin-top: 4px">
+                  Historial de retiros a tarjeta bancaria
+                </div>
+              </div>
+              <button
+                class="btn-r"
+                style="padding: 11px 20px; width: auto"
+                onclick="openRetiro()"
+              >
+                ↓ NUEVO RETIRO
+              </button>
+            </div>
+            <div class="card" style="overflow: hidden; padding: 0">
+              <div
+                style="
+                  padding: 16px 18px 13px;
+                  border-bottom: 1px solid #2b3139;
+                "
+              >
+                <span style="font-size: 15px; font-weight: 600"
+                  >Retiros realizados</span
+                >
+              </div>
+              <div id="ret-txs">
+                <div class="empty">Cargando retiros...</div>
+              </div>
+            </div>
+          </div>
         </main>
       </div>
 
-      <!-- Bottom nav (mobile) -->
+      <!-- BOTTOM NAV -->
       <nav
         id="bnav"
         style="
@@ -2044,12 +2651,11 @@
       >
         <div>
           <div class="bnav-item act" id="bn-dash" onclick="showView('dash')">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path
                 d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"
-              />
-            </svg>
-            Inicio
+              /></svg
+            >Inicio
           </div>
           <div
             class="bnav-item"
@@ -2057,8 +2663,8 @@
             onclick="showView('transfer')"
           >
             <svg
-              width="22"
-              height="22"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -2066,14 +2672,35 @@
               stroke-linecap="round"
               stroke-linejoin="round"
             >
-              <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
-            </svg>
-            Enviar
+              <path
+                d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"
+              /></svg
+            >Enviar
+          </div>
+          <div
+            class="bnav-item"
+            id="bn-retiro"
+            onclick="openRetiro()"
+            style="color: #cf304a"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+              <line x1="1" y1="10" x2="23" y2="10" /></svg
+            >Retirar
           </div>
           <div class="bnav-item" id="bn-reports" onclick="showView('reports')">
             <svg
-              width="22"
-              height="22"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -2083,18 +2710,13 @@
             >
               <path
                 d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-              />
-            </svg>
-            Reportes
+              /></svg
+            >Historial
           </div>
-          <div
-            class="bnav-item"
-            onclick="doLogout()"
-            style="color: #cf304a"
-          >
+          <div class="bnav-item" onclick="doLogout()" style="color: #cf304a">
             <svg
-              width="22"
-              height="22"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -2104,22 +2726,15 @@
             >
               <path
                 d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"
-              />
-            </svg>
-            Salir
+              /></svg
+            >Salir
           </div>
         </div>
       </nav>
     </div>
 
     <script>
-      // ══════════════════════════════════════════
-      // SUPABASE INIT
-      // ══════════════════════════════════════════
       const { createClient } = supabase;
-      // ── Sesión en sessionStorage ──────────────────────────────────────────
-      // Al cerrar el navegador o la pestaña, sessionStorage se limpia
-      // automáticamente → el usuario deberá iniciar sesión de nuevo.
       const sb = createClient(
         "https://lktpaonqarghceodcxsg.supabase.co",
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrdHBhb25xYXJnaGNlb2RjeHNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3NTE1NTksImV4cCI6MjA5MzMyNzU1OX0.9WZOCxHmz6YCISCVb72dC02v0AjeO7H-JQCheIu5IUE",
@@ -2133,18 +2748,11 @@
         },
       );
 
-      // ══════════════════════════════════════════
-      // STATE
-      // ══════════════════════════════════════════
-      let CU = null; // auth user
-      let CUS = null; // usuario row
-      let receptor = null; // validated receptor
-      let pending = null; // pending usuario insert data
-      let rtChans = []; // realtime channels
-
-      // ══════════════════════════════════════════
-      // UTILITIES
-      // ══════════════════════════════════════════
+      let CU = null,
+        CUS = null,
+        receptor = null,
+        pending = null,
+        rtChans = [];
       const $ = (id) => document.getElementById(id);
       const lo = () => $("loader").classList.remove("out");
       const hi = () => $("loader").classList.add("out");
@@ -2154,7 +2762,7 @@
         const cls = { ok: "ok-t", err: "err-t", info: "inf-t" };
         const el = document.createElement("div");
         el.className = `toast ${cls[type]}`;
-        el.innerHTML = `<span class="toast-icon">${ic[type]}</span><span>${msg}</span>`;
+        el.innerHTML = `<span style="font-size:14px;flex-shrink:0">${ic[type]}</span><span>${msg}</span>`;
         $("toast-box").appendChild(el);
         setTimeout(() => {
           el.classList.add("out");
@@ -2162,15 +2770,12 @@
         }, ms);
       }
 
-      function $$(v) {
-        return (
-          "$" +
-          parseFloat(v).toLocaleString("en-US", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })
-        );
-      }
+      const fmt$ = (v) =>
+        "$" +
+        parseFloat(v).toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
 
       function fmtDate(s) {
         const d = new Date(s);
@@ -2188,13 +2793,20 @@
       function fmtAcc(n) {
         return n ? n.replace(/(\d{4})(\d{4})(\d{2})/, "$1 $2 $3") : "—";
       }
-
       function txCode() {
         return (
           "TRX-" +
           Date.now().toString(36).toUpperCase() +
           "-" +
           Math.random().toString(36).substring(2, 8).toUpperCase()
+        );
+      }
+      function retCode() {
+        return (
+          "RET-" +
+          Date.now().toString(36).toUpperCase() +
+          "-" +
+          Math.random().toString(36).substring(2, 6).toUpperCase()
         );
       }
 
@@ -2221,9 +2833,6 @@
             .then(() => toast("Número de cuenta copiado", "ok"));
       }
 
-      // ══════════════════════════════════════════
-      // AUTH TABS
-      // ══════════════════════════════════════════
       function switchTab(tab) {
         $("form-in").style.display = tab === "in" ? "block" : "none";
         $("form-reg").style.display = tab === "reg" ? "block" : "none";
@@ -2231,15 +2840,11 @@
         $("tab-reg").className = "auth-tab " + (tab === "reg" ? "act" : "off");
       }
 
-      // ══════════════════════════════════════════
-      // REGISTER
-      // ══════════════════════════════════════════
       async function doRegister() {
         const nom = $("r-nom").value.trim().toUpperCase();
         const mail = $("r-mail").value.trim().toLowerCase();
         const tel = $("r-tel").value.trim().toUpperCase();
         const pw = $("r-pass").value;
-
         if (!nom || !mail || !tel || !pw) {
           toast("Completa todos los campos", "err");
           return;
@@ -2252,12 +2857,10 @@
           toast("Correo inválido", "err");
           return;
         }
-
         const btn = $("btn-reg");
         btn.disabled = true;
-        btn.textContent = "CREANDO CUENTA...";
+        btn.textContent = "CREANDO...";
         lo();
-
         try {
           const numCuenta = await genAccNum();
           pending = {
@@ -2267,18 +2870,16 @@
             numero_cuenta: numCuenta,
             saldo: 50.0,
           };
-
           const { data, error } = await sb.auth.signUp({
             email: mail,
             password: pw,
             options: { data: { nombres: nom, telefono: tel } },
           });
           if (error) throw error;
-
           if (!data.session) {
             hi();
             toast(
-              "Registro exitoso. Revisa tu correo para confirmar tu cuenta.",
+              "Registro exitoso. Revisa tu correo para confirmar.",
               "info",
               8000,
             );
@@ -2287,22 +2888,20 @@
             pending = null;
             return;
           }
-          // Session exists → onAuthStateChange fires → handles usuario insert
         } catch (e) {
           hi();
-          const msg = e.message?.includes("already registered")
-            ? "Este correo ya está registrado"
-            : e.message || "Error al crear cuenta";
-          toast(msg, "err");
+          toast(
+            e.message?.includes("already registered")
+              ? "Este correo ya está registrado"
+              : e.message || "Error",
+            "err",
+          );
           btn.disabled = false;
           btn.textContent = "CREAR CUENTA";
           pending = null;
         }
       }
 
-      // ══════════════════════════════════════════
-      // LOGIN
-      // ══════════════════════════════════════════
       async function doLogin() {
         const email = $("l-email").value.trim();
         const pw = $("l-pass").value;
@@ -2310,12 +2909,10 @@
           toast("Ingresa tus credenciales", "err");
           return;
         }
-
         const btn = $("btn-in");
         btn.disabled = true;
         btn.textContent = "VERIFICANDO...";
         lo();
-
         const { error } = await sb.auth.signInWithPassword({
           email,
           password: pw,
@@ -2333,18 +2930,12 @@
         }
       }
 
-      // ══════════════════════════════════════════
-      // LOGOUT
-      // ══════════════════════════════════════════
       async function doLogout() {
         lo();
         unRT();
         await sb.auth.signOut();
       }
 
-      // ══════════════════════════════════════════
-      // SHOW APP / AUTH
-      // ══════════════════════════════════════════
       function showApp() {
         $("auth-sec").style.display = "none";
         $("app-sec").style.display = "block";
@@ -2359,9 +2950,6 @@
         $("btn-in").textContent = "INGRESAR";
       }
 
-      // ══════════════════════════════════════════
-      // LOAD USER DATA
-      // ══════════════════════════════════════════
       async function loadCUS(uid) {
         const { data } = await sb
           .from("usuarios")
@@ -2371,32 +2959,22 @@
         return data;
       }
 
-      // ══════════════════════════════════════════
-      // UPDATE UI
-      // ══════════════════════════════════════════
       function updateUI() {
         if (!CUS) return;
         const { nombres, numero_cuenta, saldo } = CUS;
         const first = nombres.split(" ")[0];
         const accFmt = fmtAcc(numero_cuenta);
-        const balFmt = $$(saldo);
-
-        // Sidebar
+        const balFmt = fmt$(saldo);
         $("sb-av").textContent = first.charAt(0);
         $("sb-name").textContent = nombres;
         $("sb-acc").textContent = accFmt;
         $("sb-bal").textContent = balFmt;
-
-        // Dashboard
         $("d-name").textContent = first;
         $("d-bal").textContent = balFmt;
         $("d-acc").textContent = accFmt;
-
-        // Transfer
         $("tr-bal").textContent = balFmt;
-
-        // Reports
         $("rp-bal").textContent = balFmt;
+        $("ret-bal").textContent = balFmt;
       }
 
       function flashBal() {
@@ -2406,27 +2984,20 @@
         el.style.animation = "balanceUpdate 1.2s ease";
       }
 
-      // ══════════════════════════════════════════
-      // VIEWS
-      // ══════════════════════════════════════════
       function showView(v) {
         document
           .querySelectorAll(".view")
           .forEach((el) => el.classList.remove("act"));
         $(`view-${v}`).classList.add("act");
-
-        ["dash", "transfer", "reports"].forEach((n) => {
+        ["dash", "transfer", "reports", "retiros"].forEach((n) => {
           $(`sn-${n}`)?.classList.toggle("act", n === v);
           $(`bn-${n}`)?.classList.toggle("act", n === v);
         });
-
         if (v === "dash") renderDashTxs();
         if (v === "reports") renderReports();
+        if (v === "retiros") renderRetiros();
       }
 
-      // ══════════════════════════════════════════
-      // TRANSACTIONS
-      // ══════════════════════════════════════════
       async function getTxs(lim = 10) {
         if (!CUS) return [];
         const { data } = await sb
@@ -2448,23 +3019,22 @@
         const color = out ? "#CF304A" : "#03A66D";
         const icon = out
           ? '<path d="M4 12l8-8 8 8H16v8H8v-8H4z"/>'
-          : '<path d="M4 12l8 8 8-8h-4V4H8v8H4z"/>';
-        return `
-    <div class="tx-row">
-      <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1;">
-        <div style="width:42px;height:42px;border-radius:50%;background:${color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="${color}">${icon}</svg>
-        </div>
-        <div style="min-width:0;">
-          <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${other}</div>
-          <div style="font-size:11px;color:#848E9C;font-family:'DM Mono',monospace;margin-top:2px;">${fmtDate(tx.created_at)}</div>
-        </div>
+          : `<path d="M4 12l8 8 8-8h-4V4H8v8H4z"/>`;
+        return `<div class="tx-row">
+    <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
+      <div style="width:40px;height:40px;border-radius:50%;background:${color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="${color}">${icon}</svg>
       </div>
-      <div style="text-align:right;flex-shrink:0;margin-left:16px;">
-        <div class="mono" style="font-size:15px;font-weight:700;color:${color};">${out ? "−" : "+"}${$$(tx.monto)}</div>
-        <div style="font-size:10px;color:#848E9C;font-family:'DM Mono',monospace;margin-top:2px;letter-spacing:0.5px;">${tx.codigo_transaccion.substring(0, 14)}</div>
+      <div style="min-width:0">
+        <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${other}</div>
+        <div style="font-size:11px;color:#848E9C;font-family:'DM Mono',monospace;margin-top:1px">${fmtDate(tx.created_at)}</div>
       </div>
-    </div>`;
+    </div>
+    <div style="text-align:right;flex-shrink:0;margin-left:14px">
+      <div class="mono" style="font-size:14px;font-weight:700;color:${color}">${out ? "−" : "+"}${fmt$(tx.monto)}</div>
+      <div style="font-size:10px;color:#848E9C;font-family:'DM Mono',monospace;margin-top:1px;letter-spacing:.4px">${tx.codigo_transaccion.substring(0, 14)}</div>
+    </div>
+  </div>`;
       }
 
       async function renderDashTxs() {
@@ -2474,69 +3044,94 @@
           $("d-txs").innerHTML = '<div class="empty">Sin movimientos aún</div>';
           return;
         }
-
         let sent = 0,
-          recv = 0;
-        let html = "";
+          recv = 0,
+          html = "";
         txs.forEach((tx) => {
           if (tx.emisor_id === CUS.id) sent += +tx.monto;
           else recv += +tx.monto;
           html += txHTML(tx);
         });
         $("d-txs").innerHTML = html;
-        $("d-sent").textContent = $$(sent);
-        $("d-recv").textContent = $$(recv);
+        $("d-sent").textContent = fmt$(sent);
+        $("d-recv").textContent = fmt$(recv);
         $("d-count").textContent = txs.length;
       }
 
       async function renderReports() {
         $("rp-txs").innerHTML = '<div class="empty">Cargando...</div>';
         const txs = await getTxs(200);
-
         let sent = 0,
-          recv = 0;
-        let html = "";
+          recv = 0,
+          html = "";
         txs.forEach((tx) => {
           if (tx.emisor_id === CUS.id) sent += +tx.monto;
           else recv += +tx.monto;
           html += txHTML(tx);
         });
-
-        $("rp-sent").textContent = $$(sent);
-        $("rp-recv").textContent = $$(recv);
+        $("rp-sent").textContent = fmt$(sent);
+        $("rp-recv").textContent = fmt$(recv);
         $("rp-cnt").textContent = txs.length;
-        $("rp-bal").textContent = $$(CUS.saldo);
+        $("rp-bal").textContent = fmt$(CUS.saldo);
         $("rp-txs").innerHTML =
           html || '<div class="empty">Sin movimientos registrados</div>';
       }
 
-      // ══════════════════════════════════════════
-      // VALIDATE ACCOUNT
-      // ══════════════════════════════════════════
+      async function renderRetiros() {
+        $("ret-txs").innerHTML = '<div class="empty">Cargando...</div>';
+        if (!CUS) return;
+        const { data } = await sb
+          .from("retiros")
+          .select("*")
+          .eq("usuario_id", CUS.id)
+          .order("created_at", { ascending: false })
+          .limit(50);
+        if (!data || !data.length) {
+          $("ret-txs").innerHTML =
+            '<div class="empty">No has realizado retiros aún</div>';
+          return;
+        }
+        let html = "";
+        data.forEach((r) => {
+          html += `<div class="tx-row">
+      <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">
+        <div style="width:40px;height:40px;border-radius:50%;background:rgba(207,48,74,.1);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          ${cardBrandSmallIcon(r.tipo_tarjeta || "unknown")}
+        </div>
+        <div style="min-width:0">
+          <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.nombre_tarjeta}</div>
+          <div style="font-size:11px;color:#848E9C;font-family:'DM Mono',monospace;margin-top:1px">${(r.tipo_tarjeta || "").toUpperCase()} •••• ${r.ultimos_4} · ${fmtDate(r.created_at)}</div>
+        </div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;margin-left:14px">
+        <div class="mono" style="font-size:14px;font-weight:700;color:#CF304A">−${fmt$(r.monto)}</div>
+        <div style="margin-top:3px"><span class="chip chip-ok">✓ ${r.estado}</span></div>
+      </div>
+    </div>`;
+        });
+        $("ret-txs").innerHTML = html;
+      }
+
       async function validateAcc() {
         const acc = $("tr-acc").value.trim();
         if (acc.length !== 10) {
-          toast("Número de cuenta inválido (debe tener 10 dígitos)", "err");
+          toast("Número de cuenta inválido (10 dígitos)", "err");
           return;
         }
         if (acc === CUS.numero_cuenta) {
           toast("No puedes transferirte a ti mismo", "err");
           return;
         }
-
         const btn = $("btn-val");
         btn.disabled = true;
         btn.textContent = "...";
-
         const { data, error } = await sb
           .from("usuarios")
-          .select("id, nombres, numero_cuenta, saldo")
+          .select("id,nombres,numero_cuenta,saldo")
           .eq("numero_cuenta", acc)
           .maybeSingle();
-
         btn.disabled = false;
         btn.textContent = "VALIDAR";
-
         if (error || !data) {
           toast("Número de cuenta no encontrado", "err");
           $("verified-box").style.display = "none";
@@ -2545,7 +3140,6 @@
           receptor = null;
           return;
         }
-
         receptor = data;
         $("verified-name").textContent = data.nombres;
         $("verified-box").style.display = "block";
@@ -2554,34 +3148,24 @@
         toast(`Cuenta verificada: ${data.nombres}`, "ok");
       }
 
-      // ══════════════════════════════════════════
-      // DO TRANSFER
-      // ══════════════════════════════════════════
       async function doTransfer() {
         if (!receptor) {
           toast("Valida la cuenta destino primero", "err");
           return;
         }
-
         const monto = parseFloat($("tr-amt").value);
         if (!monto || monto <= 0) {
-          toast("Ingresa un monto válido mayor a $0", "err");
+          toast("Ingresa un monto válido", "err");
           return;
         }
         if (monto > CUS.saldo) {
-          toast(`Saldo insuficiente. Disponible: ${$$(CUS.saldo)}`, "err");
+          toast(`Saldo insuficiente. Disponible: ${fmt$(CUS.saldo)}`, "err");
           return;
         }
-        if (monto < 0.01) {
-          toast("Monto mínimo $0.01", "err");
-          return;
-        }
-
         const btn = $("btn-tr");
         btn.disabled = true;
         btn.textContent = "PROCESANDO...";
         lo();
-
         const codigo = txCode();
         try {
           const { error } = await sb.rpc("realizar_transferencia", {
@@ -2592,17 +3176,12 @@
             p_codigo: codigo,
           });
           if (error) throw error;
-
-          // Update local saldo
           CUS.saldo -= monto;
           updateUI();
           flashBal();
-
           hi();
           btn.disabled = false;
           btn.textContent = "✓ CONFIRMAR TRANSFERENCIA";
-
-          // Show receipt
           showReceipt({
             codigo,
             emisor: CUS.nombres,
@@ -2611,55 +3190,295 @@
             monto,
             ts: new Date().toISOString(),
           });
-
-          // Reset form
           $("tr-acc").value = "";
           $("tr-amt").value = "";
           $("verified-box").style.display = "none";
           $("tr-step2").style.display = "none";
           $("tr-hint").style.display = "block";
           receptor = null;
-
           await renderDashTxs();
         } catch (e) {
           hi();
           btn.disabled = false;
           btn.textContent = "✓ CONFIRMAR TRANSFERENCIA";
-          const msg = e.message?.includes("SALDO_INSUFICIENTE")
-            ? "Saldo insuficiente para realizar esta transferencia"
-            : e.message || "Error al procesar la transferencia";
-          toast(msg, "err");
+          toast(
+            e.message?.includes("SALDO_INSUFICIENTE")
+              ? "Saldo insuficiente"
+              : e.message || "Error al procesar",
+            "err",
+          );
         }
       }
 
-      // ══════════════════════════════════════════
-      // RECEIPT
-      // ══════════════════════════════════════════
       function showReceipt({ codigo, emisor, receptor, cuenta, monto, ts }) {
         $("r-cod").textContent = codigo;
         $("r-fecha").textContent = fmtDate(ts);
         $("r-emisor").textContent = emisor;
         $("r-receptor").textContent = receptor;
         $("r-cuenta").textContent = fmtAcc(cuenta);
-        $("r-monto").textContent = $$(monto);
+        $("r-monto").textContent = fmt$(monto);
         $("rec-modal").classList.remove("hide");
       }
-
       function closeReceipt() {
         $("rec-modal").classList.add("hide");
       }
-
       $("rec-modal").addEventListener("click", (e) => {
         if (e.target === $("rec-modal")) closeReceipt();
       });
 
-      // ══════════════════════════════════════════
-      // REALTIME
-      // ══════════════════════════════════════════
+      // ══ CARD DETECTION ══
+      function detectCardBrand(num) {
+        const n = num.replace(/\s/g, "");
+        if (/^4/.test(n)) return "visa";
+        if (/^(5[1-5]|222[1-9]|22[3-9]\d|2[3-6]\d{2}|27[01]\d|2720)/.test(n))
+          return "mastercard";
+        if (/^3[47]/.test(n)) return "amex";
+        if (/^(6011|65|64[4-9]|622)/.test(n)) return "discover";
+        if (/^35(2[89]|[3-8])/.test(n)) return "jcb";
+        return "unknown";
+      }
+
+      function cardBrandSVG(brand) {
+        if (brand === "visa")
+          return `<svg viewBox="0 0 54 34" width="54" height="34"><rect width="54" height="34" rx="5" fill="#1A1F71"/><text x="7" y="25" font-family="Arial Black,Arial,sans-serif" font-weight="900" font-size="18" fill="#FFFFFF" letter-spacing="-1">VISA</text></svg>`;
+        if (brand === "mastercard")
+          return `<svg viewBox="0 0 54 34" width="54" height="34"><rect width="54" height="34" rx="5" fill="#1A1A1A"/><circle cx="21" cy="17" r="11" fill="#EB001B"/><circle cx="33" cy="17" r="11" fill="#F79E1B"/><path d="M27 8.1a11 11 0 010 17.8A11 11 0 0127 8.1z" fill="#FF5F00"/></svg>`;
+        if (brand === "amex")
+          return `<svg viewBox="0 0 54 34" width="54" height="34"><rect width="54" height="34" rx="5" fill="#2E77BC"/><text x="5" y="19" font-family="Arial,sans-serif" font-weight="700" font-size="9" fill="#FFF" letter-spacing="-.2">AMERICAN</text><text x="5" y="30" font-family="Arial,sans-serif" font-weight="700" font-size="9" fill="#FFF" letter-spacing="-.2">EXPRESS</text></svg>`;
+        if (brand === "discover")
+          return `<svg viewBox="0 0 54 34" width="54" height="34"><rect width="54" height="34" rx="5" fill="#FFF" stroke="#DDD"/><text x="5" y="20" font-family="Arial,sans-serif" font-weight="700" font-size="8" fill="#231F20">DISCOVER</text><circle cx="40" cy="17" r="10" fill="#F76210"/></svg>`;
+        if (brand === "jcb")
+          return `<svg viewBox="0 0 54 34" width="54" height="34"><rect width="54" height="34" rx="5" fill="#FFF" stroke="#DDD"/><rect x="8" y="7" width="10" height="20" rx="3" fill="#003087"/><rect x="22" y="7" width="10" height="20" rx="3" fill="#CC0000"/><rect x="36" y="7" width="10" height="20" rx="3" fill="#009A44"/></svg>`;
+        return `<svg viewBox="0 0 54 34" width="54" height="34"><rect width="54" height="34" rx="5" fill="#252D36" stroke="#3d4552"/><rect x="8" y="10" width="38" height="6" rx="2" fill="#3d4552"/><rect x="8" y="20" width="22" height="4" rx="2" fill="#3d4552"/></svg>`;
+      }
+
+      function cardBrandSmallIcon(brand) {
+        if (brand === "visa")
+          return `<svg width="24" height="16" viewBox="0 0 54 34"><rect width="54" height="34" rx="5" fill="#1A1F71"/><text x="7" y="25" font-family="Arial Black" font-weight="900" font-size="18" fill="#FFF" letter-spacing="-1">VISA</text></svg>`;
+        if (brand === "mastercard")
+          return `<svg width="24" height="16" viewBox="0 0 54 34"><rect width="54" height="34" rx="5" fill="#1A1A1A"/><circle cx="21" cy="17" r="11" fill="#EB001B"/><circle cx="33" cy="17" r="11" fill="#F79E1B"/><path d="M27 8.1a11 11 0 010 17.8A11 11 0 0127 8.1z" fill="#FF5F00"/></svg>`;
+        if (brand === "amex")
+          return `<svg width="24" height="16" viewBox="0 0 54 34"><rect width="54" height="34" rx="5" fill="#2E77BC"/><text x="5" y="22" font-family="Arial" font-weight="700" font-size="12" fill="#FFF">AX</text></svg>`;
+        if (brand === "discover")
+          return `<svg width="24" height="16" viewBox="0 0 54 34"><rect width="54" height="34" rx="5" fill="#FFF" stroke="#DDD"/><circle cx="40" cy="17" r="10" fill="#F76210"/></svg>`;
+        return `<svg width="24" height="16" viewBox="0 0 54 34"><rect width="54" height="34" rx="5" fill="#CF304A" opacity=".3"/></svg>`;
+      }
+
+      const BRAND_BG = {
+        visa: "135deg,#1A1F71 0%,#0d1540 100%",
+        mastercard: "135deg,#1a0a0a 0%,#2a1010 100%",
+        amex: "135deg,#0a2040 0%,#153360 100%",
+        discover: "135deg,#7a2c00 0%,#3d1600 100%",
+        jcb: "135deg,#001a50 0%,#000d28 100%",
+        unknown: "135deg,#1a2035 0%,#0d1520 100%",
+      };
+
+      function updateCardBrandUI(brand) {
+        $("card-brand-icon").innerHTML = cardBrandSVG(brand);
+        $("card-brand-sm").innerHTML =
+          `<div>${cardBrandSmallIcon(brand)}</div>`;
+        $("card-preview").style.background =
+          `linear-gradient(${BRAND_BG[brand] || BRAND_BG.unknown})`;
+      }
+
+      function onCardNumInput(inp) {
+        let val = inp.value.replace(/\D/g, "");
+        const brand = detectCardBrand(val);
+        if (brand === "amex") {
+          val = val
+            .substring(0, 15)
+            .replace(/(\d{4})(\d{0,6})?(\d{0,5})?/, (_, a, b, c) =>
+              [a, b, c].filter(Boolean).join(" "),
+            );
+        } else {
+          val = val.substring(0, 16).replace(/(\d{4})(?=\d)/g, "$1 ");
+        }
+        inp.value = val;
+        const raw = inp.value.replace(/\s/g, "");
+        const total = brand === "amex" ? 15 : 16;
+        const padded = raw.padEnd(total, "•");
+        let display =
+          brand === "amex"
+            ? padded.substring(0, 4) +
+              " " +
+              padded.substring(4, 10) +
+              " " +
+              padded.substring(10, 15)
+            : padded.match(/.{1,4}/g).join(" ");
+        $("card-num-display").textContent = display;
+        updateCardBrandUI(brand);
+      }
+
+      function cardNumKeydown(e, inp) {
+        if (e.key === "Backspace" && inp.value.endsWith(" ")) {
+          e.preventDefault();
+          inp.value = inp.value.slice(0, -2);
+        }
+      }
+
+      function onExpiryInput(inp) {
+        let val = inp.value.replace(/\D/g, "");
+        if (val.length >= 2)
+          val = val.substring(0, 2) + "/" + val.substring(2, 4);
+        inp.value = val;
+        $("card-exp-display").textContent = val || "MM/AA";
+      }
+
+      function updateCardName(v) {
+        $("card-name-display").textContent =
+          v.toUpperCase() || "NOMBRE APELLIDO";
+      }
+
+      function openRetiro() {
+        if (!CUS) return;
+        $("ret-bal").textContent = fmt$(CUS.saldo);
+        $("retiro-form-wrap").style.display = "block";
+        $("retiro-processing").style.display = "none";
+        $("retiro-success").style.display = "none";
+        $("ret-cardnum").value = "";
+        $("ret-name").value = "";
+        $("ret-expiry").value = "";
+        $("ret-cvv").value = "";
+        $("ret-amount").value = "";
+        $("card-num-display").textContent = "•••• •••• •••• ••••";
+        $("card-name-display").textContent = "NOMBRE APELLIDO";
+        $("card-exp-display").textContent = "MM/AA";
+        updateCardBrandUI("unknown");
+        $("retiro-modal").classList.remove("hide");
+      }
+
+      function closeRetiro() {
+        $("retiro-modal").classList.add("hide");
+        if ($("view-retiros").classList.contains("act")) renderRetiros();
+      }
+      $("retiro-modal").addEventListener("click", (e) => {
+        if (e.target === $("retiro-modal")) closeRetiro();
+      });
+
+      async function doRetiro() {
+        const rawNum = $("ret-cardnum").value.replace(/\s/g, "");
+        const name = $("ret-name").value.trim().toUpperCase();
+        const expiry = $("ret-expiry").value.trim();
+        const cvv = $("ret-cvv").value.trim();
+        const monto = parseFloat($("ret-amount").value);
+        const brand = detectCardBrand(rawNum);
+        if (rawNum.length < 13) {
+          toast("Número de tarjeta inválido", "err");
+          return;
+        }
+        if (!name || name.length < 3) {
+          toast("Ingresa el nombre del titular", "err");
+          return;
+        }
+        if (!expiry.includes("/") || expiry.length < 5) {
+          toast("Fecha de vencimiento inválida", "err");
+          return;
+        }
+        if (cvv.length < 3) {
+          toast("CVV inválido", "err");
+          return;
+        }
+        if (!monto || monto <= 0) {
+          toast("Ingresa un monto válido", "err");
+          return;
+        }
+        if (monto < 1) {
+          toast("Monto mínimo: $1.00", "err");
+          return;
+        }
+        if (monto > CUS.saldo) {
+          toast(`Saldo insuficiente. Disponible: ${fmt$(CUS.saldo)}`, "err");
+          return;
+        }
+        const ultimos4 = rawNum.slice(-4);
+        const codigo = retCode();
+
+        // Show processing
+        $("retiro-form-wrap").style.display = "none";
+        $("retiro-processing").style.display = "block";
+        for (let i = 1; i <= 6; i++) {
+          const el = $(`ps-${i}`);
+          el.classList.remove("active", "done");
+        }
+
+        // Staggered step activation
+        const stepDelays = [0, 820, 1680, 2560, 3420, 4200];
+        const stepDurations = [780, 820, 840, 820, 760, 700];
+        for (let i = 1; i <= 6; i++) {
+          (function (n) {
+            setTimeout(
+              () => {
+                for (let j = 1; j < n; j++) $(`ps-${j}`).classList.add("done");
+                $(`ps-${n}`).classList.add("active");
+              },
+              stepDelays[n - 1],
+            );
+          })(i);
+        }
+
+        // Process after animation
+        setTimeout(async () => {
+          try {
+            for (let i = 1; i <= 6; i++) $(`ps-${i}`).classList.add("done");
+            // Try RPC first
+            const { error } = await sb.rpc("procesar_retiro", {
+              p_usuario_id: CUS.id,
+              p_monto: monto,
+              p_ultimos_4: ultimos4,
+              p_nombre_tarjeta: name,
+              p_tipo_tarjeta: brand,
+              p_expiry: expiry,
+              p_codigo: codigo,
+            });
+            if (error) {
+              // Fallback manual
+              if (
+                error.message?.includes("function") ||
+                error.code === "PGRST202"
+              ) {
+                if (CUS.saldo < monto) throw new Error("SALDO_INSUFICIENTE");
+                const { error: e2 } = await sb
+                  .from("usuarios")
+                  .update({ saldo: CUS.saldo - monto })
+                  .eq("id", CUS.id);
+                if (e2) throw e2;
+                await sb
+                  .from("retiros")
+                  .insert({
+                    usuario_id: CUS.id,
+                    monto,
+                    ultimos_4: ultimos4,
+                    nombre_tarjeta: name,
+                    tipo_tarjeta: brand,
+                    expiry,
+                    estado: "completado",
+                    codigo,
+                  });
+              } else throw error;
+            }
+            CUS.saldo -= monto;
+            updateUI();
+            flashBal();
+            $("retiro-processing").style.display = "none";
+            $("retiro-success").style.display = "block";
+            $("ret-success-amount").textContent = fmt$(monto);
+            $("ret-success-card").textContent =
+              `${brand.toUpperCase()} •••• •••• •••• ${ultimos4}`;
+          } catch (e) {
+            $("retiro-processing").style.display = "none";
+            $("retiro-form-wrap").style.display = "block";
+            toast(
+              e.message?.includes("SALDO_INSUFICIENTE")
+                ? "Saldo insuficiente para este retiro"
+                : e.message || "Error al procesar retiro",
+              "err",
+            );
+          }
+        }, 4950);
+      }
+
       function subRT() {
         if (!CUS) return;
-
-        // New incoming transfer
         const ch1 = sb
           .channel(`rt-tx-${CUS.id}`)
           .on(
@@ -2671,8 +3490,11 @@
               filter: `receptor_id=eq.${CUS.id}`,
             },
             async (payload) => {
-              const m = payload.new.monto;
-              toast(`¡HA RECIBIDO UNA TRANSFERENCIA DE ${$$(m)}!`, "ok", 7000);
+              toast(
+                `¡Ha recibido una transferencia de ${fmt$(payload.new.monto)}!`,
+                "ok",
+                7000,
+              );
               const updated = await loadCUS(CU.id);
               if (updated) {
                 CUS = updated;
@@ -2683,8 +3505,6 @@
             },
           )
           .subscribe();
-
-        // My saldo updates
         const ch2 = sb
           .channel(`rt-us-${CUS.id}`)
           .on(
@@ -2701,85 +3521,78 @@
             },
           )
           .subscribe();
-
         rtChans = [ch1, ch2];
       }
-
       function unRT() {
         rtChans.forEach((c) => sb.removeChannel(c));
         rtChans = [];
       }
 
-      // ══════════════════════════════════════════
-      // AUTH STATE CHANGE
-      // ══════════════════════════════════════════
       sb.auth.onAuthStateChange(async (event, session) => {
         if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session) {
-          // Guard: si ya estamos en la app con el mismo usuario, no re-procesar
-          if (CU && CU.id === session.user.id && $("app-sec").style.display !== "none") return;
+          if (
+            CU &&
+            CU.id === session.user.id &&
+            $("app-sec").style.display !== "none"
+          )
+            return;
           try {
-          CU = session.user;
-          lo();
-
-          let userData = await loadCUS(CU.id);
-
-          if (!userData) {
-            // Create usuario record
-            const meta = CU.user_metadata || {};
-            const numCuenta = pending?.numero_cuenta || (await genAccNum());
-            const insertData = pending || {
-              nombres: (
-                meta.nombres ||
-                CU.email?.split("@")[0] ||
-                "USUARIO"
-              ).toUpperCase(),
-              correo: (CU.email || "").toUpperCase(),
-              telefono: (meta.telefono || "").toUpperCase(),
-              numero_cuenta: numCuenta,
-              saldo: 50.0,
-            };
-            pending = null;
-
-            const { error: ie } = await sb
-              .from("usuarios")
-              .insert({ user_id: CU.id, ...insertData });
-            if (ie) {
+            CU = session.user;
+            lo();
+            let userData = await loadCUS(CU.id);
+            if (!userData) {
+              const meta = CU.user_metadata || {};
+              const numCuenta = pending?.numero_cuenta || (await genAccNum());
+              const insertData = pending || {
+                nombres: (
+                  meta.nombres ||
+                  CU.email?.split("@")[0] ||
+                  "USUARIO"
+                ).toUpperCase(),
+                correo: (CU.email || "").toUpperCase(),
+                telefono: (meta.telefono || "").toUpperCase(),
+                numero_cuenta: numCuenta,
+                saldo: 50.0,
+              };
+              pending = null;
+              const { error: ie } = await sb
+                .from("usuarios")
+                .insert({ user_id: CU.id, ...insertData });
+              if (ie) {
+                hi();
+                toast("Error al crear perfil: " + ie.message, "err");
+                return;
+              }
+              userData = await loadCUS(CU.id);
+            } else {
+              pending = null;
+            }
+            if (!userData) {
               hi();
-              toast("Error al crear perfil de usuario: " + ie.message, "err");
+              toast("Error al cargar datos", "err");
               return;
             }
-            userData = await loadCUS(CU.id);
-          } else {
-            pending = null;
-          }
-
-          if (!userData) {
+            CUS = userData;
+            updateUI();
+            showApp();
+            showView("dash");
             hi();
-            toast("Error al cargar datos del usuario", "err");
-            return;
-          }
-
-          CUS = userData;
-          updateUI();
-          showApp();
-          showView("dash");
-          hi();
-          subRT();
-
-          $("btn-in")?.setAttribute("disabled", false);
-          $("btn-in").disabled = false;
-          $("btn-in").textContent = "INGRESAR";
-          $("btn-reg").disabled = false;
-          $("btn-reg").textContent = "CREAR CUENTA";
-
-          toast(`Bienvenido, ${CUS.nombres.split(" ")[0]}`, "ok");
+            subRT();
+            $("btn-in").disabled = false;
+            $("btn-in").textContent = "INGRESAR";
+            $("btn-reg").disabled = false;
+            $("btn-reg").textContent = "CREAR CUENTA";
+            toast(`Bienvenido, ${CUS.nombres.split(" ")[0]}`, "ok");
           } catch (e) {
             hi();
             $("btn-in").disabled = false;
             $("btn-in").textContent = "INGRESAR";
-            toast("Error al iniciar sesión: " + (e.message || "Error inesperado"), "err");
+            toast("Error: " + (e.message || "Error inesperado"), "err");
           }
-        } else if (event === "SIGNED_OUT" || (event === "INITIAL_SESSION" && !session)) {
+        } else if (
+          event === "SIGNED_OUT" ||
+          (event === "INITIAL_SESSION" && !session)
+        ) {
           showAuth();
           hi();
         } else if (event === "TOKEN_REFRESHED" && session) {
@@ -2787,29 +3600,27 @@
         }
       });
 
-      // ══════════════════════════════════════════
-      // KEY LISTENERS
-      // ══════════════════════════════════════════
       document.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
-          if (document.activeElement === $("l-pass")) doLogin();
-          if (document.activeElement === $("l-email")) doLogin();
+          if (
+            document.activeElement === $("l-pass") ||
+            document.activeElement === $("l-email")
+          )
+            doLogin();
           if (document.activeElement === $("tr-acc")) validateAcc();
           if (document.activeElement === $("tr-amt")) doTransfer();
         }
-        if (e.key === "Escape") closeReceipt();
+        if (e.key === "Escape") {
+          closeReceipt();
+          closeRetiro();
+        }
       });
 
-      // ══════════════════════════════════════════
-      // INIT — fallback de seguridad
-      // onAuthStateChange maneja INITIAL_SESSION automáticamente.
-      // Este bloque solo actúa si onAuthStateChange no se disparó.
-      // ══════════════════════════════════════════
       setTimeout(async () => {
-        // Si después de 3s el loader sigue visible y no hay sesión activa,
-        // mostrar pantalla de login como fallback.
         if (!$("loader").classList.contains("out")) {
-          const { data: { session } } = await sb.auth.getSession();
+          const {
+            data: { session },
+          } = await sb.auth.getSession();
           if (!session) {
             hi();
             showAuth();
