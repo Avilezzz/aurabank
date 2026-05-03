@@ -1,43 +1,5 @@
 <!doctype html>
 <html lang="es">
-  <!--
-╔══════════════════════════════════════════════════════════════════════╗
-║              AURABANK — SQL PARA SUPABASE (ejecutar primero)        ║
-╠══════════════════════════════════════════════════════════════════════╣
-║                                                                      ║
-║  CREATE TABLE retiros (                                              ║
-║    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,                   ║
-║    usuario_id UUID REFERENCES usuarios(id) ON DELETE CASCADE,       ║
-║    monto DECIMAL(12,2) NOT NULL,                                     ║
-║    ultimos_4 TEXT NOT NULL,                                          ║
-║    nombre_tarjeta TEXT NOT NULL,                                     ║
-║    tipo_tarjeta TEXT NOT NULL,                                       ║
-║    expiry TEXT NOT NULL,                                             ║
-║    estado TEXT DEFAULT 'completado',                                 ║
-║    codigo TEXT NOT NULL,                                             ║
-║    created_at TIMESTAMPTZ DEFAULT NOW()                              ║
-║  );                                                                  ║
-║  ALTER TABLE retiros ENABLE ROW LEVEL SECURITY;                     ║
-║  CREATE POLICY "Users can manage own retiros" ON retiros FOR ALL    ║
-║    USING(usuario_id IN (SELECT id FROM usuarios                      ║
-║                         WHERE user_id = auth.uid()));                ║
-║                                                                      ║
-║  CREATE OR REPLACE FUNCTION procesar_retiro(                        ║
-║    p_usuario_id UUID, p_monto DECIMAL,                               ║
-║    p_ultimos_4 TEXT, p_nombre_tarjeta TEXT,                          ║
-║    p_tipo_tarjeta TEXT, p_expiry TEXT, p_codigo TEXT                 ║
-║  ) RETURNS VOID LANGUAGE plpgsql AS $$                              ║
-║  BEGIN                                                               ║
-║    IF (SELECT saldo FROM usuarios WHERE id=p_usuario_id)<p_monto    ║
-║    THEN RAISE EXCEPTION 'SALDO_INSUFICIENTE'; END IF;               ║
-║    UPDATE usuarios SET saldo=saldo-p_monto WHERE id=p_usuario_id;   ║
-║    INSERT INTO retiros(usuario_id,monto,ultimos_4,nombre_tarjeta,   ║
-║      tipo_tarjeta,expiry,estado,codigo)                              ║
-║    VALUES(p_usuario_id,p_monto,p_ultimos_4,p_nombre_tarjeta,        ║
-║      p_tipo_tarjeta,p_expiry,'completado',p_codigo);                 ║
-║  END; $$;                                                            ║
-╚══════════════════════════════════════════════════════════════════════╝
--->
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -609,21 +571,30 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 4px;
+        gap: 3px;
         flex: 1;
         min-width: 0;
-        padding: 10px 4px 8px;
+        padding: 8px 2px 6px;
         cursor: pointer;
         color: #848e9c;
-        font-size: 10px;
+        font-size: 9.5px;
         font-weight: 600;
-        letter-spacing: 0.3px;
+        letter-spacing: 0.2px;
         transition:
           color 0.2s,
           background 0.2s;
         -webkit-tap-highlight-color: transparent;
         user-select: none;
         position: relative;
+        overflow: hidden;
+        white-space: nowrap;
+      }
+      .bnav-item span.bnav-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 100%;
+        display: block;
       }
       .bnav-item:active {
         background: rgba(255, 255, 255, 0.04);
@@ -834,6 +805,14 @@
         #main {
           padding: 10px !important;
           padding-bottom: 90px !important;
+        }
+        .bnav-item {
+          font-size: 8.5px !important;
+          padding: 7px 1px 5px !important;
+        }
+        .bnav-item svg {
+          width: 17px !important;
+          height: 17px !important;
         }
       }
       @media (min-width: 769px) {
@@ -1396,7 +1375,7 @@
             ¡Retiro exitoso!
           </div>
           <div style="font-size: 12px; color: #848e9c; margin-bottom: 22px">
-            Los fondos llegarán en 1–3 días hábiles
+            Los fondos llegarán en 2–3 días hábiles
           </div>
           <div
             id="ret-success-amount"
@@ -2655,7 +2634,7 @@
               <path
                 d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"
               /></svg
-            >Inicio
+            ><span class="bnav-label">Inicio</span>
           </div>
           <div
             class="bnav-item"
@@ -2675,7 +2654,7 @@
               <path
                 d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"
               /></svg
-            >Enviar
+            ><span class="bnav-label">Enviar</span>
           </div>
           <div
             class="bnav-item"
@@ -2695,7 +2674,7 @@
             >
               <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
               <line x1="1" y1="10" x2="23" y2="10" /></svg
-            >Retirar
+            ><span class="bnav-label">Retirar</span>
           </div>
           <div class="bnav-item" id="bn-reports" onclick="showView('reports')">
             <svg
@@ -2711,7 +2690,7 @@
               <path
                 d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
               /></svg
-            >Historial
+            ><span class="bnav-label">Historial</span>
           </div>
           <div class="bnav-item" onclick="doLogout()" style="color: #cf304a">
             <svg
@@ -2727,7 +2706,7 @@
               <path
                 d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"
               /></svg
-            >Salir
+            ><span class="bnav-label">Salir</span>
           </div>
         </div>
       </nav>
@@ -3442,18 +3421,16 @@
                   .update({ saldo: CUS.saldo - monto })
                   .eq("id", CUS.id);
                 if (e2) throw e2;
-                await sb
-                  .from("retiros")
-                  .insert({
-                    usuario_id: CUS.id,
-                    monto,
-                    ultimos_4: ultimos4,
-                    nombre_tarjeta: name,
-                    tipo_tarjeta: brand,
-                    expiry,
-                    estado: "completado",
-                    codigo,
-                  });
+                await sb.from("retiros").insert({
+                  usuario_id: CUS.id,
+                  monto,
+                  ultimos_4: ultimos4,
+                  nombre_tarjeta: name,
+                  tipo_tarjeta: brand,
+                  expiry,
+                  estado: "completado",
+                  codigo,
+                });
               } else throw error;
             }
             CUS.saldo -= monto;
@@ -3464,6 +3441,13 @@
             $("ret-success-amount").textContent = fmt$(monto);
             $("ret-success-card").textContent =
               `${brand.toUpperCase()} •••• •••• •••• ${ultimos4}`;
+            setTimeout(() => {
+              toast(
+                "⏱ Tu dinero tardará entre 2 a 3 días hábiles en llegar a la tarjeta de tu cuenta bancaria enlazada.",
+                "info",
+                9000
+              );
+            }, 600);
           } catch (e) {
             $("retiro-processing").style.display = "none";
             $("retiro-form-wrap").style.display = "block";
